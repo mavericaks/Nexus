@@ -170,7 +170,7 @@ Ask for each of these **when the phase that needs it starts**, not before — fr
 | Phase 9 | Render account + service; GitHub repo secrets for CI/CD deploy | Human creates the Render account/service; human adds repo secrets via GitHub UI — never the agent typing them into a file | GitHub Actions repo secrets |
 | Phase 10 | **Decided: hardware is not pre-existing** (§9) — nothing to confirm, the cluster gets built fresh from scratch on the current laptop as part of Phase 10 itself | N/A — this is a build task now, not a confirmation-then-build task | N/A |
 
-What you can decide yourself, without asking: installing dependencies via Gradle/npm; writing code/tests/migrations/config *structure* with empty placeholder names; starting/stopping local Docker Compose services that need no external credentials; ordinary implementation decisions clearly covered by the master spec.
+What you can decide yourself, without asking: installing dependencies via Maven/npm; writing code/tests/migrations/config *structure* with empty placeholder names; starting/stopping local Docker Compose services that need no external credentials; ordinary implementation decisions clearly covered by the master spec.
 
 ---
 
@@ -180,7 +180,7 @@ Each phase: **Preconditions → Tasks → Gate (exit criteria) → Required evid
 
 ### Phase 0 — Repo scaffold
 **Preconditions:** none.
-**Tasks:** Gradle multi-module or package skeleton per master-spec §3; Spring Profiles skeleton; Docker Compose (Postgres w/ `pgvector/pgvector:pg16` image — not vanilla `postgres`, Redis, Kafka); `.env.example` with empty placeholder names; **ArchUnit test asserting `domain` imports nothing from `jakarta.persistence`/`org.springframework`, wired into the build** (don't defer this — it has nothing to check yet, which is exactly when it's cheapest to add); GitHub Actions skeleton with the full step order from §6 including the `STUB:`-grep and secret-scan steps, even before there's real code for them to catch anything; `CURRENT_STATE.md` and `SETUP_CHECKLIST.md` created from the templates in §7.
+**Tasks:** Maven multi-module or package skeleton per master-spec §3; Spring Profiles skeleton; Docker Compose (Postgres w/ `pgvector/pgvector:pg16` image — not vanilla `postgres`, Redis, Kafka); `.env.example` with empty placeholder names; **ArchUnit test asserting `domain` imports nothing from `jakarta.persistence`/`org.springframework`, wired into the build** (don't defer this — it has nothing to check yet, which is exactly when it's cheapest to add); GitHub Actions skeleton with the full step order from §6 including the `STUB:`-grep and secret-scan steps, even before there's real code for them to catch anything; `CURRENT_STATE.md` and `SETUP_CHECKLIST.md` created from the templates in §7.
 **Gate:** `docker compose up` gives a clean local environment with Postgres/Redis/Kafka reachable.
 **Evidence:** terminal output of `docker compose up` showing all services healthy, plus a passing (trivially-true-but-real) ArchUnit test run.
 

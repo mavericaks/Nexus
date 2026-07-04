@@ -62,7 +62,7 @@ Stop work on the current task and explicitly ask the human, in plain language, w
 ### 2.4 What you CAN do without asking
 
 To avoid the opposite failure (asking about everything, including trivia):
-- Installing project dependencies via the build tool (Gradle dependencies, npm packages) — this doesn't need a human decision.
+- Installing project dependencies via the build tool (Maven dependencies, npm packages) — this doesn't need a human decision.
 - Writing code, tests, migrations, config *structure* (with placeholder variable **names**, never placeholder **values**) — e.g., committing `.env.example` with `GROQ_API_KEY=` (empty) is fine; committing it with `GROQ_API_KEY=sk-fake-12345` is not.
 - Starting/stopping local Docker Compose services (Postgres, Redis, Kafka) that don't need external credentials.
 - Making ordinary implementation decisions clearly covered by the master spec.

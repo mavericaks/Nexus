@@ -22,7 +22,7 @@
 
 | Concern | Technology | Notes |
 |---|---|---|
-| Language/framework | Java 21 (LTS) + Spring Boot 3.x | |
+| Language/framework | Java 21 (LTS) + Spring Boot 3.x + Maven | |
 | AI orchestration | Spring AI (ChatClient, RAG advisor, MCP client) | |
 | LLM inference | Groq (OpenAI-compatible API, Llama 3.3 70B / GPT-OSS) | Free, no card, rate-limited — design around it |
 | Database | Neon Postgres (pgvector extension enabled) | 0.5 GB / 100 CU-hrs free |
@@ -98,7 +98,7 @@ com.nexus
 
 | Phase | Deliverable | Gate to move on |
 |---|---|---|
-| 0 | Repo scaffold, Gradle, Spring Profiles skeleton, Docker Compose (Postgres, Redis, Kafka) | `docker compose up` gives a clean local environment |
+| 0 | Repo scaffold, Maven, Spring Profiles skeleton, Docker Compose (Postgres, Redis, Kafka) | `docker compose up` gives a clean local environment |
 | 1 | Domain model, Flyway migrations, RLS policies | Migrations run clean; a manual cross-tenant query returns zero rows |
 | 2 | Core REST API: DTOs, validation, exception handling, pagination/filtering/Specifications | Full CRUD ticket API works in Postman, unauthenticated |
 | 3 | Security: JWT, OAuth2, RBAC | Same API now requires auth; role checks enforced and tested |
