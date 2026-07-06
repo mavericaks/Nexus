@@ -45,20 +45,18 @@
 
 ## 3. Architecture
 
-**Style:** Clean Architecture with Spring Boot as the delivery mechanism, not the center of the design.
-
+**Style:** Clean Architecture *within* each feature module, package-by-feature at the top level, enforced by Spring Modulith (ADR 0002). Not package-by-layer globally — Modulith's `ApplicationModules.verify()` treats top-level packages as module boundaries, so domain/application/infrastructure/api are nested inside each feature module, not siblings at the root.
 ```
 com.nexus
- ├── domain/            # entities, value objects, ticket state machine, domain events. ZERO Spring/JPA imports.
- ├── application/         # use-case services, DTOs, mappers. Orchestrates domain + infrastructure via interfaces domain defines.
- ├── infrastructure/
- │    ├── persistence/    # JPA entities/repositories, Specifications, Flyway migrations
- │    ├── ai/              # Spring AI config, MCP client, Groq integration, RAG
- │    ├── messaging/        # Kafka producers/consumers
- │    ├── cache/            # Redis config, Spring Cache setup
- │    └── security/          # JWT, OAuth2, RBAC config
- ├── api/                   # REST controllers, request/response DTOs, global exception handler
- └── config/                 # @ConfigurationProperties classes, Spring Profile beans
+ ├── ticket/              # feature module — domain/application/infrastructure/api nested inside
+ │    ├── domain/           # zero Spring/JPA imports, verified per-module
+ │    ├── application/
+ │    ├── infrastructure/
+ │    └── api/
+ ├── tenant/
+ ├── notification/         # the Phase 5 extraction — still a Modulith module here, Spring Boot service later if actually pulled out
+ ├── ai/                    # Spring AI, MCP client, RAG
+ └── shared/                # cross-module kernel: shared value objects, nothing module-specific
 ```
 
 **Rule for the coding agent:** `domain` package must compile with zero framework dependencies. If you find yourself importing `jakarta.persistence` or `org.springframework` into `domain`, stop — that class belongs in `infrastructure` or `application`, or the domain model needs a plain interface that infrastructure implements.

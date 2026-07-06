@@ -215,7 +215,7 @@ Each phase: **Preconditions → Tasks → Gate (exit criteria) → Required evid
 
 ### Phase 5 — State machine, Kafka, async
 **Preconditions:** Phase 4 gate met.
-**Tasks:** full ticket lifecycle state machine (`NEW → CLASSIFIED → AI_DRAFTED → AUTO_RESOLVED|ESCALATED → IN_PROGRESS → RESOLVED → CLOSED`); Kafka producer/consumer for lifecycle events; `ApplicationEventPublisher` fan-out to Kafka/audit-log/metrics observers; `@Async` or worker-based triage so an LLM call never blocks the request thread; scheduled jobs (nightly KB re-index, stuck-ticket SLA sweep).
+**Tasks:** full ticket lifecycle state machine (`NEW → CLASSIFIED → AI_DRAFTED → AUTO_RESOLVED|ESCALATED → IN_PROGRESS → RESOLVED → CLOSED`); Kafka producer/consumer for lifecycle events; `ApplicationEventPublisher` fan-out to Kafka/audit-log/metrics observers; `@Async` or worker-based triage so an LLM call never blocks the request thread; scheduled jobs (nightly KB re-index, stuck-ticket SLA sweep). **Notification Service extracted as its own small Spring Boot service here** (see ADR 0001) — it only consumes Kafka events (`ticket.escalated`, etc.), has no synchronous dependency on the core API, and is the one deliberate exception to the modular-monolith decision. Give it its own idempotent-consumer dedup check (§ Kafka rationale) before wiring in real email/Slack sending.
 **Gate:** ticket lifecycle events are published and consumed; nothing blocks the request thread.
 **Evidence:** a Kafka consumer log showing the event sequence for one ticket's full lifecycle, plus a timing measurement showing the HTTP response returns before triage completes.
 
