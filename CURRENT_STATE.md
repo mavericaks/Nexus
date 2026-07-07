@@ -9,7 +9,9 @@
 - None at kickoff — the four pre-flight questions are resolved, see playbook §9. Add new ones here only as they genuinely arise.
 
 ## In progress right now
-- Phase 0, Unit 1: creating CURRENT_STATE.md and SETUP_CHECKLIST.md
+- Phase 0, Unit 5 (next): Docker Compose + .env.example — not started yet
+- Units 1–4 complete: CURRENT_STATE.md, SETUP_CHECKLIST.md, parent POM, child POM, NexusApplication.java, application.yml
+- Branch: `feat/repo-scaffold` (3 commits ahead of main)
 
 ## Known deviations from the playbook (should be rare, must have an ADR)
 - none
