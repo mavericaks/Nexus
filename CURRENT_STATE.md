@@ -1,0 +1,20 @@
+# Current State
+
+**Phase:** 0 — Repo scaffold
+**Last passing gate (automated evidence):** none yet
+**Human manual sign-off (§2.10):** none yet
+**Last passing test run:** none yet
+
+## Open questions blocked on a human answer
+- None at kickoff — the four pre-flight questions are resolved, see playbook §9. Add new ones here only as they genuinely arise.
+
+## In progress right now
+- Phase 0, Unit 1: creating CURRENT_STATE.md and SETUP_CHECKLIST.md
+
+## Known deviations from the playbook (should be rare, must have an ADR)
+- none
+
+## Reference docs present in this repo (checked at session start, §1)
+- `/docs/nexus-master-spec.md`: present
+- `/docs/nexus-architecture-rationale.md`: present
+- `/docs/nexus-agent-guardrails.md`: present

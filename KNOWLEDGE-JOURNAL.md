@@ -1,0 +1,96 @@
+# Knowledge Journal
+
+The full, detailed explanations from every unit of this project — the before-code context, the after-code walkthrough, decisions that matter, and what could go wrong. This is the companion to `LEARNING-LOG.md` (which is your own-words recall). Use this as reference material when you need the details again.
+
+---
+
+## Phase 0 — Repo Scaffold
+
+### Unit 1: `CURRENT_STATE.md` and `SETUP_CHECKLIST.md`
+
+#### Before code — what and why
+These two files are the project's memory between sessions. `CURRENT_STATE.md` records what phase we're in, what's done, what's blocked, and which reference docs are present — so any session (or any person) that opens this repo knows exactly where things stand without re-reading the whole playbook. `SETUP_CHECKLIST.md` tracks every external credential the project will eventually need, when it's needed, and whether it's been provided — so we never hit a surprise mid-phase "I need an API key you don't have." We create them now, at the very start of Phase 0, because the playbook's Session Start Protocol (§1) reads them first thing — if they don't exist, no future session can start cleanly.
+
+#### Files created
+- `CURRENT_STATE.md` — from the template in playbook §7
+- `SETUP_CHECKLIST.md` — from the template in playbook §7
+
+#### Decisions that matter
+1. **"In progress right now" starts populated, not empty.** The §7 template has a placeholder. We filled it with the actual current work so anyone opening the repo sees the real state, not a template.
+2. **All three reference docs marked `present`.** We actually checked — `ls` on `/docs/` confirmed all three files exist. If any were missing, we'd write `absent` and note it's non-blocking per §0's resilience clause.
+3. **Every row in SETUP_CHECKLIST is `pending`, and that's correct.** Phase 0 needs zero credentials (§4). The first credential ask happens at Phase 1 start (Neon Postgres). Logging them all now means you can see the full road ahead.
+
+#### What could go wrong
+If someone hand-edits one of these files and introduces a typo in a status field (e.g., `providd` instead of `provided`), there's no validation — these are plain Markdown, not structured data. The playbook relies on discipline, not tooling, to keep them accurate.
+
+---
+
+### Unit 2: Maven Parent POM (`pom.xml`)
+
+#### Before code — what and why
+A single file — `pom.xml` at the repo root — that tells Maven "this project exists, it uses Java 21 and Spring Boot 3, and it has these sub-modules." It contains no application code. It's purely build configuration.
+
+Every Java file we write from here on needs to be compiled, and Maven is the tool that does that. Without this file, there's no project — no `mvn test`, no `mvn spring-boot:run`, nothing. It's the foundation everything else sits on.
+
+Think of it like a table of contents for a book that also specifies what language the book is written in and what printing press to use. The chapters (modules like `ticket`, `tenant`, `ai`) don't exist yet — we'll create their individual POMs in the next units — but this parent POM declares they will exist and what they all share.
+
+#### File created
+- `pom.xml` (repo root) — the parent/aggregator POM
+
+#### Decisions that matter
+
+**1. Why does `<parent>` point to `spring-boot-starter-parent` instead of standing alone?**
+By inheriting from Spring Boot's parent POM, we get ~200 dependency versions pre-locked (the right version of Jackson, Hibernate, Logback, etc. that are tested together with Spring Boot 3.4.1). Without this, we'd have to manually pick compatible versions for every library — a recipe for obscure runtime errors from version mismatches.
+
+**2. Why `<packaging>pom</packaging>`?**
+This parent POM doesn't produce a JAR — it's just a container that says "build these child modules and here are the shared settings." The `pom` packaging type tells Maven: "don't try to compile Java code here, just manage children."
+
+**3. Why `<dependencyManagement>` with BOMs instead of `<dependencies>`?**
+This is the most important distinction in the file. `<dependencies>` would force every child module to include Spring AI and Modulith whether it needs them or not. `<dependencyManagement>` only **locks the versions** — each child module still chooses what it actually uses. Think of it as "if any child wants Spring AI, they get version 1.0.0" versus "every child must have Spring AI."
+
+**4. Why a single `nexus-app` module instead of separate Maven modules per feature (ticket, tenant, ai, etc.)?**
+The master spec (§3) says to use Spring Modulith, which enforces module boundaries through **packages**, not Maven modules. Having `com.nexus.ticket` and `com.nexus.tenant` as packages within one module lets Modulith's `ApplicationModules.verify()` catch illegal cross-module access. Splitting them into separate Maven modules would add build complexity without adding enforcement we don't already get from Modulith + ArchUnit.
+
+**5. The key versions chosen:**
+- **Java 21** — the current Long Term Support (LTS) release, as specified by the master spec §2
+- **Spring Boot 3.4.1** — latest stable in the 3.x line
+- **Spring AI 1.0.0** — the GA release that works with Spring Boot 3.4.x
+- **Spring Modulith 1.3.1** — compatible with Spring Boot 3.4.x
+
+#### What could go wrong
+The `nexus-app` module doesn't exist yet — if you ran `mvn validate` right now, Maven would fail with "Could not find child module nexus-app." That's expected; the child module POM is the next unit. This file is temporarily in a broken state until then.
+
+---
+
+### Unit 3: Child Module POM (`nexus-app/pom.xml`)
+
+#### Before code — what and why
+The parent POM locked **versions** (via `<dependencyManagement>`). This child POM declares **what we actually use**. Think of the parent as a restaurant's price list and this child as your actual order — the price list exists so everything has a consistent price, but you still have to say what you want.
+
+For Phase 0, we need enough to: start a Spring Boot web app (even if it does nothing yet), run the ArchUnit domain-purity test, and set up the test infrastructure (JUnit 5). We also declared database dependencies (JPA, PostgreSQL, Flyway) because they're structural — they define what kind of application this is, even though they won't be used until Phase 1.
+
+#### File created
+- `nexus-app/pom.xml` — the child module POM
+
+#### Decisions that matter
+
+**1. Why no `<version>` on most dependencies?**
+The parent POM inherits from `spring-boot-starter-parent`, which already locks ~200 library versions to ones tested together with Spring Boot 3.4.1. Only `archunit-junit5` (version `1.3.0`) has an explicit version because ArchUnit isn't part of Spring Boot's managed set.
+
+**2. Why is PostgreSQL `<scope>runtime</scope>` but JPA isn't?**
+- No scope (default = `compile`) → available everywhere — your code can import its classes
+- `runtime` → available when running the app, but NOT when compiling. Code never imports `org.postgresql` directly — it talks through JPA/Hibernate, which uses the driver internally. Making it `runtime` enforces nobody writes raw JDBC bypassing JPA.
+- `test` → only available during test execution. ArchUnit, Testcontainers, etc. never ship in production.
+
+**3. Why Testcontainers already?**
+The dependency declaration is cheap (a line). Having it ready means Phase 1's RLS integration tests just use it — no mid-phase reconfiguration. Containers don't start until a test asks for one.
+
+**4. Why `spring-boot-maven-plugin` in `<build>`?**
+This makes `mvn spring-boot:run` work and packages the app into a "fat JAR" (one file = app + all dependencies + embedded web server). Without it, you'd get a normal JAR that can't run on its own.
+
+#### What could go wrong
+We declared `spring-boot-starter-data-jpa` which requires a database connection on startup. Running the app right now without a database URL would fail. Docker Compose (upcoming unit) provides Postgres, and Spring Profiles will configure the connection. Until then, `mvn spring-boot:run` would crash — that's expected, not a bug.
+
+---
+
+*This document is updated every unit. Scroll to the bottom for the latest.*
