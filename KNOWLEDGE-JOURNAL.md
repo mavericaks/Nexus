@@ -93,4 +93,36 @@ We declared `spring-boot-starter-data-jpa` which requires a database connection 
 
 ---
 
+### Unit 4: Spring Boot Application Entry Point (`NexusApplication.java`)
+
+#### Before code — what and why
+Every Spring Boot application needs exactly one class with a `main` method that starts the whole thing — the ignition key. It lives at `com.nexus` (the root package), and Spring Boot automatically scans every sub-package beneath it for components. Placing it at the root means all feature modules (`ticket`, `tenant`, `ai`, etc.) are discovered automatically.
+
+#### Files created
+- `nexus-app/src/main/java/com/nexus/NexusApplication.java` — the entry point class
+- `nexus-app/src/main/resources/application.yml` — minimal base configuration
+
+#### Decisions that matter
+
+**1. `@SpringBootApplication` — one annotation doing three jobs:**
+- `@Configuration` — "this class can define beans (objects Spring manages)"
+- `@EnableAutoConfiguration` — "look at my dependencies and configure yourself automatically"
+- `@ComponentScan` — "scan my package and everything under it"
+
+This is why the class is at `com.nexus` and not deeper — scanning starts from this class's package and goes downward.
+
+**2. `SpringApplication.run()` — what happens in that one line:**
+Creates the Spring container, reads `application.yml`, auto-configures based on classpath dependencies (JPA → Hibernate, Web → embedded Tomcat), scans for components, starts everything.
+
+**3. YAML over `.properties`:**
+Both work. YAML is more readable for nested config, and we'll have a lot of it (database, security, AI providers).
+
+**4. No feature packages created yet.**
+They'll appear naturally as we add code. Empty packages in Java serve no purpose — they'd just be directories with nothing in them.
+
+#### What could go wrong
+Running the app now would crash — JPA auto-configuration tries to connect to a database we haven't configured yet. Docker Compose + Spring Profiles (next units) will fix this. This is expected, not a bug.
+
+---
+
 *This document is updated every unit. Scroll to the bottom for the latest.*

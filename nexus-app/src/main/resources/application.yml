@@ -1,0 +1,7 @@
+# Nexus Application Configuration
+# Profile-specific config goes in application-{profile}.yml files.
+# This file holds defaults shared across all profiles.
+
+spring:
+  application:
+    name: nexus
