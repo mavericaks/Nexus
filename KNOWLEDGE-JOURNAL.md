@@ -125,4 +125,63 @@ Running the app now would crash — JPA auto-configuration tries to connect to a
 
 ---
 
+### Unit 5: Docker Compose + `.env.example`
+
+#### Before code — what and why
+The app crashes without a database. Docker Compose lets us run Postgres, Redis, and Kafka as containers with one command (`docker compose up`) — no native installation needed. `.env.example` is a committed map of every environment variable, with empty values only (real values go in gitignored `.env`).
+
+#### Files created
+- `docker-compose.yml` — three services: Postgres+pgvector, Redis, Kafka (KRaft mode)
+- `.env.example` — every env var grouped by phase, empty placeholders only
+
+#### Decisions that matter
+
+**1. `${POSTGRES_PASSWORD:-nexus_local}` syntax:** Uses `.env` value if present, otherwise falls back to the default. Means `docker compose up` works without creating `.env` first — safe local-only defaults.
+
+**2. Health checks on every service:** Without them, Docker says "running" the instant a container starts, even if the service inside isn't ready for connections yet. Health checks verify actual readiness (e.g., `pg_isready` for Postgres, `redis-cli ping` for Redis).
+
+**3. Kafka in KRaft mode (no ZooKeeper):** Kafka 3.x manages its own metadata without a separate ZooKeeper service. One fewer container, fewer failure points. `KAFKA_PROCESS_ROLES: broker,controller` = this single node does both jobs.
+
+**4. Named volumes (`nexus-pg-data`, `nexus-redis-data`):** Persist data across container restarts. `docker compose down` keeps them; `docker compose down -v` deletes them for a fresh start.
+
+**5. `start_period: 30s` on Kafka only:** Kafka takes ~20-30s to boot (initialize logs, elect controller). Without this, Docker would mark it unhealthy before it even finishes starting.
+
+**6. `.env.example` values are all empty:** Per §2.1 — "never fake values." This file is a map showing what exists and when you'll need it. Real values go in `.env`.
+
+#### What could go wrong
+The Kafka health check script path (`/opt/kafka/bin/kafka-broker-api-versions.sh`) is specific to the `apache/kafka:3.8.0` image. A future image version could move it, causing a false "unhealthy" status — a config problem, not a Kafka problem.
+
+---
+
+### Unit 6: Spring Profiles (`application.yml` + `application-dev.yml`)
+
+#### Before code — what and why
+The app crashes on startup because JPA tries to connect to a database we've never told it about. Spring Profiles solve this: each environment (dev, test, prod) gets its own `application-{profile}.yml` file, and the base `application.yml` holds settings shared by all. This unit finally connects the app to the Docker Compose Postgres.
+
+#### Files modified/created
+- `application.yml` (modified) — expanded with shared JPA, Flyway, and server settings
+- `application-dev.yml` (new) — dev profile pointing at local Docker Compose Postgres
+
+#### Decisions that matter
+
+**1. `ddl-auto: validate`, not `update` or `create-drop`:**
+Flyway owns the schema — it runs versioned SQL migration scripts in order. Hibernate's `validate` mode only checks that entity class fields match the actual DB columns, and crashes if they don't. This catches mapping mistakes at startup instead of silently ignoring them. `update` would let Hibernate modify the schema behind Flyway's back, creating drift between what Flyway thinks the schema is and what it actually is.
+
+**2. `open-in-view: false`:**
+Spring Boot's default is `true`, which keeps a Hibernate session open for the entire HTTP request — including while rendering the response. This means lazy-loaded relationships magically work in controller/view code, but it masks N+1 query bugs (each lazy access fires a separate SQL query you don't see) and holds database connections longer than necessary. Disabling it forces you to explicitly load the data you need in the service layer, which is noisy at first but prevents a whole class of production performance problems.
+
+**3. Dev profile credentials match `docker-compose.yml` defaults:**
+`nexus` / `nexus_local` are the same defaults used in the `${POSTGRES_PASSWORD:-nexus_local}` syntax from docker-compose.yml. This means `docker compose up -d` + `mvn spring-boot:run -Dspring.profiles.active=dev` works without creating a `.env` file. These are local-only defaults — they never reach production.
+
+**4. `show-sql: true` + `format_sql: true` in dev only:**
+Every SQL statement Hibernate generates is printed to the console. This is essential for catching the exact queries JPA produces — especially N+1 patterns where loading 100 tickets generates 101 queries instead of 2. In prod, this would flood logs and hurt performance.
+
+**5. `clean-disabled: false` in dev only:**
+Flyway's `clean` command drops the entire schema and re-runs all migrations from scratch. In dev, this is a lifesaver when you make a mistake in a migration. In prod, it would delete all data — which is why it's disabled by default and only enabled here.
+
+#### What could go wrong
+The dev credentials (`nexus` / `nexus_local`) are hardcoded in the profile file, not pulled from environment variables. This is fine for local dev (they match docker-compose.yml's defaults), but if someone changes the docker-compose.yml password without updating the dev profile, the app crashes with an authentication error on startup. The error message from Postgres is clear though — `FATAL: password authentication failed for user "nexus"` — so it's easy to diagnose.
+
+---
+
 *This document is updated every unit. Scroll to the bottom for the latest.*
