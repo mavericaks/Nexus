@@ -184,4 +184,33 @@ The dev credentials (`nexus` / `nexus_local`) are hardcoded in the profile file,
 
 ---
 
+### Unit 7: ArchUnit Domain-Purity Test
+
+#### Before code — what and why
+The domain layer (any `*.domain.*` package) must be pure Java — no Spring, no JPA, no Hibernate imports. This constraint is what keeps domain logic fast to test (no Spring context needed) and framework-independent. ArchUnit lets you write this constraint as a JUnit test: "no classes in `..domain..` should depend on classes in `org.springframework..` or `jakarta.persistence..`." The playbook (§2.3) says to add this in Phase 0, before any domain classes exist — it's cheapest to enforce a rule when nobody can violate it yet.
+
+#### Files created
+- `nexus-app/src/test/java/com/nexus/architecture/DomainPurityTest.java` — two ArchUnit tests (one for Spring imports, one for JPA/Hibernate imports)
+
+#### Decisions that matter
+
+**1. Two tests, not one:**
+Splitting "no Spring" and "no JPA" into separate test methods gives clearer failure messages. If someone adds `@Entity` to a domain class, the failure says exactly "domain must not import JPA" — not a combined error mixing Spring and JPA violations.
+
+**2. `allowEmptyShould(true)` — a real bug we hit and fixed:**
+ArchUnit 1.3 defaults `failOnEmptyShould` to `true`. This means a rule that matches zero classes *fails* instead of passing trivially. Since no `*.domain.*` packages exist yet, both tests failed on the first run with: "Rule failed to check any classes." The fix is `.allowEmptyShould(true)` — the rule passes trivially now but will actively enforce once domain classes appear in Phase 1.
+
+**Class of bug:** configuration-default mismatch. The library's default behavior changed between versions (older ArchUnit silently passed on empty rule sets), and the new default is stricter. Reading the error message told us exactly what to do.
+
+**3. `ImportOption.DO_NOT_INCLUDE_TESTS`:**
+Without this, ArchUnit would scan test classes too. Test helpers sometimes legitimately import Spring (`@SpringBootTest`), so we exclude them — the rule only applies to production code.
+
+**4. `..domain..` double-dot syntax:**
+In ArchUnit, `..` means "any sub-package at any depth." So `..domain..` matches `com.nexus.ticket.domain`, `com.nexus.ticket.domain.model`, `com.nexus.tenant.domain` — every domain package across every feature module.
+
+#### What could go wrong
+If someone creates a package named `domain` outside the expected structure (e.g., `com.nexus.shared.domain`), the rule catches it — which is correct, but might surprise someone who didn't expect `shared` to have a domain package. The fix is renaming the package, not weakening the rule.
+
+---
+
 *This document is updated every unit. Scroll to the bottom for the latest.*
