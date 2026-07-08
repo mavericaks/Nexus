@@ -3,7 +3,7 @@
 **Phase:** 0 — Repo scaffold
 **Last passing gate (automated evidence):** none yet
 **Human manual sign-off (§2.10):** none yet
-**Last passing test run:** none yet
+**Last passing test run:** `mvn test -pl nexus-app -Dtest="com.nexus.architecture.DomainPurityTest"` (2026-07-08)
 
 ## Open questions blocked on a human answer
 - None at kickoff — the four pre-flight questions are resolved, see playbook §9. Add new ones here only as they genuinely arise.
