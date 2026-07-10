@@ -213,4 +213,31 @@ If someone creates a package named `domain` outside the expected structure (e.g.
 
 ---
 
+### Unit 8: GitHub Actions CI Skeleton
+
+#### Before code — what and why
+If tests only run on a developer's laptop, the `main` branch will eventually break. Continuous Integration (CI) solves this by running a script automatically on every push and Pull Request. We use GitHub Actions, and per playbook §6, our pipeline isn't just running tests — it includes security gates that stop bad code *before* testing. We build this skeleton in Phase 0 so that from day one, every commit is checked for leaked secrets, unresolved stubs, and domain-purity violations.
+
+#### Files created
+- `.github/workflows/ci.yml` — the GitHub Actions workflow definition
+
+#### Decisions that matter
+
+**1. `gitleaks-action` for Secret Scanning:**
+We run a Gitleaks step to catch accidentally committed `.env` files or API keys. If someone commits a hardcoded database password, this job fails immediately. It acts as the automated backstop to the "never commit secrets" rule.
+
+**2. The `STUB:` grep check:**
+The playbook allows using `// STUB: reason` to defer implementation, but forbids merging them to `main`. The shell command `grep -rnw . -e "STUB:"` scans the entire repository for the word "STUB:". If it finds it, it returns an exit code of 1, failing the build. This enforces the rule without human vigilance.
+
+**3. Ordering of steps:**
+We put linting, secret scanning, and STUB checking *before* the Java/Maven setup. Why? Because they are cheap and fast. If you committed a secret, we want the build to fail in 5 seconds, not after downloading Maven dependencies for 2 minutes. Fail fast saves time and compute.
+
+**4. `mvn test` without wrappers:**
+Since we didn't add the `mvnw` wrapper in previous units, the runner uses its globally installed Maven environment (via `actions/setup-java`). The `--no-transfer-progress` flag stops Maven from printing hundreds of lines of "Downloading..." to the CI logs, keeping the output readable.
+
+#### What could go wrong
+The `grep` command searches the entire directory. If you add a markdown file (like this journal!) that contains the word "STUB:" as part of an explanation, the CI will fail because it matched the text in the documentation. We will likely need to refine the `grep` later to only search `.java` files (e.g., using `--include=\*.java`) if this becomes a nuisance.
+
+---
+
 *This document is updated every unit. Scroll to the bottom for the latest.*

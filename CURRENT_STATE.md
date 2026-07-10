@@ -9,8 +9,8 @@
 - None at kickoff — the four pre-flight questions are resolved, see playbook §9. Add new ones here only as they genuinely arise.
 
 ## In progress right now
-- Phase 0, Unit 8 (next): GitHub Actions CI skeleton
-- Units 1–7 complete: CURRENT_STATE.md, SETUP_CHECKLIST.md, parent POM, child POM, NexusApplication.java, application.yml, Docker Compose, .env.example, Spring Profiles, ArchUnit domain-purity test
+- Phase 1, Unit 1 (next): Domain model skeleton and Flyway baseline
+- Units 1–8 complete: CURRENT_STATE.md, SETUP_CHECKLIST.md, parent POM, child POM, NexusApplication.java, application.yml, Docker Compose, .env.example, Spring Profiles, ArchUnit domain-purity test, GitHub Actions CI
 - Branch: `feat/repo-scaffold`
 
 ## Known deviations from the playbook (should be rare, must have an ADR)
