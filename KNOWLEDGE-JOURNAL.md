@@ -272,4 +272,41 @@ If we add a new enum value later (e.g., `WAITING_ON_CUSTOMER`), the Flyway migra
 
 ---
 
+### Unit 2: Flyway Baseline Migration (`V1__baseline_schema.sql`)
+
+#### Before code — what and why
+We have domain enums but no database tables. This unit creates the first Flyway migration — a versioned SQL script that builds the `tenants` and `tickets` tables. Flyway tracks which migrations have been applied, so a fresh database gets the exact same schema as everyone else's. We set `ddl-auto: validate` in Phase 0 for this reason — Hibernate never touches the schema, only Flyway does.
+
+#### Files created
+- `nexus-app/src/main/resources/db/migration/V1__baseline_schema.sql` — creates `tenants`, `tickets`, indexes, and enables pgvector extension
+
+#### Decisions that matter
+
+**1. `TIMESTAMPTZ`, not `TIMESTAMP`:**
+`TIMESTAMP` stores a date without timezone — if your server moves to a different timezone, every timestamp shifts. `TIMESTAMPTZ` stores an absolute point in time (internally always UTC), and Postgres converts to the session's timezone on display. For a multi-tenant SaaS with tenants in different timezones, this is non-negotiable.
+
+**2. `gen_random_uuid()` as default, not application-generated:**
+The database generates UUIDs, not Java. This means even raw SQL inserts get valid IDs, and there's no coordination needed between application instances. `gen_random_uuid()` is built into Postgres 13+, no extension needed.
+
+**3. `VARCHAR(50)` for enum columns, not Postgres `ENUM` type:**
+Postgres has a native `ENUM` type, but adding a new value to it requires `ALTER TYPE ... ADD VALUE` — which can't run inside a transaction. Using `VARCHAR` and storing the Java enum name as a string (`EnumType.STRING`) means adding a new enum value in Java is a code-only change, no migration needed.
+
+**4. Two indexes on `tenant_id`:**
+Every query in a multi-tenant system filters by `tenant_id`. Without an index, that's a full table scan on every request. The composite index `(tenant_id, status)` covers the most common dashboard query: "this tenant's tickets, filtered by status."
+
+**5. `ON DELETE CASCADE` on `tenant_id` FK:**
+If a tenant is deleted, all their tickets are deleted automatically. This prevents orphaned rows and simplifies tenant offboarding. In production you'd likely soft-delete tenants instead, but the FK constraint ensures referential integrity either way.
+
+**6. `CREATE EXTENSION IF NOT EXISTS vector`:**
+Enables pgvector now (Phase 0 uses the `pgvector/pgvector:pg16` image). We won't use embeddings until Phase 4, but enabling the extension in the baseline is free and means Phase 4's migration doesn't need to worry about it.
+
+#### Verification
+- Ran `mvn spring-boot:run -Dspring-boot.run.profiles=dev` — Flyway output: `Successfully applied 1 migration to schema "public", now at version v1`
+- Verified via `psql`: `tenants`, `tickets`, and `flyway_schema_history` tables exist with correct columns and indexes
+
+#### What could go wrong
+If someone edits this file after it's been applied, Flyway will detect the checksum mismatch and refuse to start the app — "Migration checksum mismatch." The fix is never editing an applied migration; write a new `V2__` instead. This is Flyway working correctly, not a bug.
+
+---
+
 *This document is updated every unit. Scroll to the bottom for the latest.*
