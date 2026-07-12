@@ -239,5 +239,37 @@ Since we didn't add the `mvnw` wrapper in previous units, the runner uses its gl
 The `grep` command searches the entire directory. If you add a markdown file (like this journal!) that contains the word "STUB:" as part of an explanation, the CI will fail because it matched the text in the documentation. We will likely need to refine the `grep` later to only search `.java` files (e.g., using `--include=\*.java`) if this becomes a nuisance.
 
 ---
+---
+
+## Phase 1 — Domain Model, Migrations, RLS
+
+### Unit 1: Domain Value Objects (Ticket Enums)
+
+#### Before code — what and why
+Before we can write a database table or a JPA entity, we need to define the vocabulary of the domain in pure Java. What statuses can a ticket have? What priorities? What categories? These enums are the building blocks everything else depends on — the Flyway migration will create columns matching these values, the REST API will validate against them, and the AI triage will assign them. They live in `com.nexus.ticket.domain` with zero framework imports, enforced by the ArchUnit test from Phase 0.
+
+#### Files created
+- `nexus-app/src/main/java/com/nexus/ticket/domain/TicketStatus.java` — the full lifecycle: NEW → CLASSIFIED → AI_DRAFTED → AUTO_RESOLVED | ESCALATED → IN_PROGRESS → RESOLVED → CLOSED
+- `nexus-app/src/main/java/com/nexus/ticket/domain/TicketPriority.java` — LOW, MEDIUM, HIGH, CRITICAL
+- `nexus-app/src/main/java/com/nexus/ticket/domain/TicketCategory.java` — BILLING, TECHNICAL, ACCOUNT, FEATURE_REQUEST, GENERAL
+
+#### Decisions that matter
+
+**1. Enums, not strings:**
+Storing ticket status as a string ("new", "classified") means a typo like "classifed" compiles fine and only fails at runtime — or worse, silently creates a new status nobody expected. Enums catch this at compile time. The database will store these as VARCHAR via `@Enumerated(EnumType.STRING)` in the JPA entity later, so the DB column is human-readable in raw queries.
+
+**2. Status enum names the states, doesn't enforce transitions:**
+`TicketStatus` only defines *what states exist*. The rule "a CLOSED ticket can't go back to NEW" will be enforced by a separate state machine class — not by the enum itself. This is the State pattern: the enum is the vocabulary, the state machine is the grammar.
+
+**3. Categories map to knowledge-base partitions:**
+When the AI triage classifies a ticket as `TECHNICAL`, the RAG pipeline searches the `TECHNICAL` partition of the tenant's knowledge base first. This improves retrieval relevance — a billing question shouldn't match technical documentation.
+
+**4. This is the first code in `com.nexus.ticket.domain`:**
+This creates the package structure the master spec (§3) requires: feature modules as top-level packages (`ticket`, `tenant`, `ai`), with `domain/application/infrastructure/api` nested inside each. The ArchUnit test now scans real domain classes, not just an empty package.
+
+#### What could go wrong
+If we add a new enum value later (e.g., `WAITING_ON_CUSTOMER`), the Flyway migration that creates the column won't know about it — we'd need a new migration to add it to any CHECK constraint, or use `EnumType.STRING` (which we will) so Postgres stores the raw string and accepts new values without a schema change.
+
+---
 
 *This document is updated every unit. Scroll to the bottom for the latest.*
