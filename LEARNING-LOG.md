@@ -19,4 +19,4 @@ Unit VI :
 Unit VII :
 -Created ArchUnit Test to ensure domain purity i.e., no spring or jpa imports in domain classes. This was done to keep the code clean and fast to test. This is done only for prod code not for test as for test SpringBootTest is required .
 Unit VIII :
--
+-Created github ci.yml file to keep a check on the code and files getting commited to the repo so that no sensitive data is commited to main branch , no STUB's are left and a complete execution of the code in the fresh environment .
