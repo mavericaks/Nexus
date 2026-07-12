@@ -1,17 +1,17 @@
 # Current State
 
-**Phase:** 0 — Repo scaffold
-**Last passing gate (automated evidence):** none yet
-**Human manual sign-off (§2.10):** none yet
+**Phase:** 1 — Domain model, migrations, RLS
+**Last passing gate (automated evidence):** Phase 0 — `docker compose ps` all 3 services healthy (2026-07-12) + ArchUnit DomainPurityTest 2/2 passed (2026-07-08)
+**Human manual sign-off (§2.10):** Phase 0 — confirmed by human (2026-07-12)
 **Last passing test run:** `mvn test -pl nexus-app -Dtest="com.nexus.architecture.DomainPurityTest"` (2026-07-08)
 
 ## Open questions blocked on a human answer
 - None at kickoff — the four pre-flight questions are resolved, see playbook §9. Add new ones here only as they genuinely arise.
 
 ## In progress right now
-- Phase 1, Unit 1 (next): Domain model skeleton and Flyway baseline
-- Units 1–8 complete: CURRENT_STATE.md, SETUP_CHECKLIST.md, parent POM, child POM, NexusApplication.java, application.yml, Docker Compose, .env.example, Spring Profiles, ArchUnit domain-purity test, GitHub Actions CI
-- Branch: `feat/repo-scaffold`
+- Phase 1, Unit 1 (next): Domain value objects (enums, IDs)
+- Phase 0 complete (8 units)
+- Branch: `feat/repo-scaffold` (to be merged to main, then new branch for Phase 1)
 
 ## Known deviations from the playbook (should be rare, must have an ADR)
 - none
