@@ -308,5 +308,39 @@ Enables pgvector now (Phase 0 uses the `pgvector/pgvector:pg16` image). We won't
 If someone edits this file after it's been applied, Flyway will detect the checksum mismatch and refuse to start the app — "Migration checksum mismatch." The fix is never editing an applied migration; write a new `V2__` instead. This is Flyway working correctly, not a bug.
 
 ---
+---
+
+### Unit 3: JPA Entities (Infrastructure Layer)
+
+#### Before code — what and why
+We have domain enums (pure Java, no imports) and database tables (Flyway). Now we need the bridge: JPA entities — Java classes with `@Entity`, `@Table`, `@Column` that tell Hibernate how to map objects to rows. These live in `infrastructure.persistence`, NOT `domain`, because they carry `jakarta.persistence` imports. The dependency direction is infrastructure → domain (never the reverse). Since `ddl-auto: validate`, Hibernate checks these entities against the real schema at startup — any mismatch crashes the app immediately.
+
+#### Files created
+- `com.nexus.tenant.domain.PlanTier` — pure Java enum: FREE, STARTER, PROFESSIONAL, ENTERPRISE
+- `com.nexus.tenant.infrastructure.persistence.TenantEntity` — JPA entity → `tenants` table
+- `com.nexus.ticket.infrastructure.persistence.TicketEntity` — JPA entity → `tickets` table
+
+#### Decisions that matter
+
+**1. Infrastructure, not domain:**
+`@Entity` is a JPA annotation — it tells Hibernate "this class maps to a database table." That's a framework concern, not a business logic concern. The domain enums (`TicketStatus`, `PlanTier`) are imported BY the entity, but the domain never imports the entity. This is the Clean Architecture dependency rule: dependencies point inward.
+
+**2. `@Enumerated(EnumType.STRING)`, not `ORDINAL`:**
+`ORDINAL` stores the enum's position number (0, 1, 2...). If someone reorders the enum values, every row in the database silently means something different. `STRING` stores the actual name ("NEW", "CLASSIFIED"), so reordering is safe and raw SQL queries are human-readable.
+
+**3. `@Version` for optimistic locking:**
+The `version` field on `TicketEntity` enables optimistic locking. When Hibernate updates a ticket, it adds `WHERE version = ?` to the UPDATE statement. If two agents edit the same ticket simultaneously, the second one's WHERE clause fails (the version was already incremented), and Hibernate throws `OptimisticLockException`. This prevents silent overwrites without heavyweight row locks.
+
+**4. `FetchType.LAZY` on the tenant relationship:**
+Loading a ticket doesn't automatically load the full tenant object. Without LAZY, querying 100 tickets would fire 100 extra SQL queries to load their tenants (the N+1 problem). With LAZY, Hibernate only loads the tenant when you explicitly access it. The `getTenantId()` helper method extracts just the FK value without triggering a query.
+
+**5. No `@CreationTimestamp`/`@UpdateTimestamp`:**
+We set timestamps in the constructor and setters instead of using Hibernate's auto-timestamp annotations. This keeps the behavior explicit — you can see exactly when `updatedAt` gets set. The database also has `DEFAULT now()` as a fallback for raw SQL inserts.
+
+#### Verification
+- App booted with `dev` profile: Hibernate validated both entities against the schema — no errors
+- ArchUnit: 2/2 passed — `PlanTier` in `tenant.domain` has zero framework imports
+
+---
 
 *This document is updated every unit. Scroll to the bottom for the latest.*
