@@ -1,0 +1,37 @@
+# Nexus Application Configuration
+# Profile-specific config goes in application-{profile}.yml files.
+# This file holds defaults shared across all profiles.
+
+spring:
+  application:
+    name: nexus
+
+  # ─── JPA / Hibernate (shared across all profiles) ──────────────────
+  jpa:
+    # Flyway owns the schema — Hibernate only checks that entities match it.
+    # "validate" = crash on startup if an entity field doesn't match a column,
+    # but never create/alter/drop tables itself.
+    hibernate:
+      ddl-auto: validate
+
+    # OSIV (Open Session In View) keeps a Hibernate session open for the
+    # entire HTTP request — convenient, but masks lazy-loading bugs and
+    # causes surprise N+1 queries. We disable it and load data explicitly.
+    open-in-view: false
+
+    properties:
+      hibernate:
+        # Use the modern Hibernate 6 naming strategy that converts
+        # camelCase Java fields to snake_case SQL columns automatically.
+        physical_naming_strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
+
+  # ─── Flyway (shared across all profiles) ───────────────────────────
+  flyway:
+    enabled: true
+    # Migration scripts live here. Flyway runs them in version order
+    # (V1__, V2__, ...) and tracks which have already been applied.
+    locations: classpath:db/migration
+
+# ─── Server ──────────────────────────────────────────────────────────
+server:
+  port: 8080
