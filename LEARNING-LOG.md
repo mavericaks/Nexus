@@ -20,3 +20,11 @@ Unit VII :
 -Created ArchUnit Test to ensure domain purity i.e., no spring or jpa imports in domain classes. This was done to keep the code clean and fast to test. This is done only for prod code not for test as for test SpringBootTest is required .
 Unit VIII :
 -Created github ci.yml file to keep a check on the code and files getting commited to the repo so that no sensitive data is commited to main branch , no STUB's are left and a complete execution of the code in the fresh environment .
+
+## Phase 1
+Unit I :
+-Created Domain Value Objects which is pure java no JPA entity and these are enums and value object because every other layer depends on this so defining them first with flyway means we can write state machine transition and then build database schema that stores them . 8 state machine lifecycle(NEW , CLASSIFIED , RESOLVED ,CLOSED ,ETC) with 4 levels of priority(LOW , MEDIUM , HIGH , CRITICAL) and 5 categories of tickets are created(BILLING , TECHNICAL , ETC) 
+Unit II :
+-Created Flyway Baseline Migration (V1__baseline_schema.sql) which creates the tenants and tickets tables . Used Flyway because schema change is version controlled and we can redeploy old version if needed . The baseline migration is used to create the schema that is already present in the database . Using ddl_auto : validate because hibernate shouldn't change the db for any typo .
+Unit III :
+-Created JPA Entities which is the bridge between domain and database . These entities are annotated with @Entity , @Table , @Column and @Version to tell Hibernate how to map objects to rows . These entities are in infrastructure.persistence package and not in domain package because they carry framework imports . @Version is used for optimistic locking and @Enumerated(EnumType.STRING) is used to store the enum values as strings in the database .

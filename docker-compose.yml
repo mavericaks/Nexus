@@ -2,6 +2,11 @@
 # Start with: docker compose up -d
 # Stop with:  docker compose down
 # Reset data:  docker compose down -v  (deletes volumes = deletes all data)
+#
+# PORT NOTE: Host ports are set high (15432, 16379, 19092) to avoid
+# Windows Hyper-V / WinNAT dynamic port reservation conflicts.
+# These reserved ranges change on every reboot, so standard ports
+# (5432, 6379, 9092) are unreliable on Windows with Docker Desktop.
 
 services:
 
@@ -16,7 +21,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-nexus}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexus_local}
     ports:
-      - "5432:5432"
+      - "15432:5432"
     volumes:
       - nexus-pg-data:/var/lib/postgresql/data
     healthcheck:
@@ -32,7 +37,7 @@ services:
     image: redis:7-alpine
     container_name: nexus-redis
     ports:
-      - "6379:6379"
+      - "16379:6379"
     volumes:
       - nexus-redis-data:/data
     healthcheck:
@@ -51,7 +56,7 @@ services:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:19092
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
@@ -61,7 +66,7 @@ services:
       KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
       CLUSTER_ID: nexus-local-dev-cluster-001
     ports:
-      - "9092:9092"
+      - "19092:9092"
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
       interval: 10s
