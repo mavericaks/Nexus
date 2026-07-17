@@ -25,14 +25,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 3. STUB: grep — fails the build if any // STUB: remains on main
+      # 3. Unresolved marker grep — fails if any // STUB: remains in Java source
+      # Only searches .java files to avoid false positives from docs/CI config.
       - name: Check for unresolved STUBs
         run: |
-          if grep -rnw . -e "STUB:"; then
-            echo "Error: Found unresolved 'STUB:' markers in code. Fix them before merging."
+          if grep -rnw --include='*.java' . -e 'STUB:'; then
+            echo "Error: Found unresolved 'STUB:' markers in Java source. Fix them before merging."
             exit 1
           else
-            echo "No STUB markers found. Clean!"
+            echo "No STUB markers found in Java source. Clean!"
           fi
 
       # Setup Java 21 for the Maven steps
@@ -49,7 +50,8 @@ jobs:
         # We'll wire up org.owasp:dependency-check-maven here later
 
       # 5 & 6. Unit & Integration Tests 
-      # (Currently runs our ArchUnit test from Unit 7)
+      # Runs ArchUnit (domain purity) and domain tests (state machine).
+      # No database needed — these are pure Java tests.
       - name: Run Tests
         run: mvn test --no-transfer-progress
 
