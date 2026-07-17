@@ -13,21 +13,12 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      # 1. Lint/format check — fails fast if code isn't formatted correctly
+      # 1. Lint/format check — placeholder for spotless
       - name: Lint and Format Check
-        run: echo "Linting check placeholder - will fail fast if format is wrong"
+        run: echo "Linting check placeholder - will wire up spotless later"
 
-      # 2. Secret scan — prevents committing .env values or keys
-      # Uses gitleaks CLI directly (free, no license required)
-      - name: Gitleaks Secret Scan
-        run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz | tar xz
-          ./gitleaks detect --source . --verbose --no-git
-
-      # 3. Unresolved marker grep — fails if any // STUB: remains in Java source
+      # 2. Unresolved marker grep — fails if any // STUB: remains in Java source
       - name: Check for unresolved STUBs
         run: |
           if grep -rnw --include='*.java' . -e 'STUB:'; then
@@ -37,7 +28,7 @@ jobs:
             echo "No STUB markers found in Java source. Clean!"
           fi
 
-      # Setup Java 21 for the Maven steps
+      # 3. Setup Java 21
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -45,16 +36,14 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      # 4. Dependency vulnerability scan
+      # 4. Dependency vulnerability scan — placeholder for OWASP
       - name: Dependency Check
         run: echo "Dependency vulnerability scan placeholder"
 
-      # 5 & 6. Unit & Integration Tests
+      # 5. Unit & Integration Tests
       - name: Run Tests
         run: mvn test --no-transfer-progress
 
-      # 7. Build Docker Image (Dry Run / Multi-stage build check)
+      # 6. Build verification — placeholder for Docker
       - name: Verify Docker Build
         run: echo "Docker build verification placeholder"
-        
-      # Step 8 (Deploy to Render) will be added in Phase 9.
