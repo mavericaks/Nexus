@@ -342,5 +342,44 @@ We set timestamps in the constructor and setters instead of using Hibernate's au
 - ArchUnit: 2/2 passed — `PlanTier` in `tenant.domain` has zero framework imports
 
 ---
+---
+
+### Unit 4: RLS Policies + Low-Privilege App Role
+
+#### Before code — what and why
+Without RLS, a bug in the application code (forgetting a `WHERE tenant_id = ?`) leaks every tenant's data. RLS moves this protection into the database: Postgres automatically filters rows by `tenant_id`, even for queries that forgot to include the filter. Three things were needed: (1) a low-privilege `nexus_app` role (separate from the Flyway owner), (2) RLS policies on `tickets`, (3) `FORCE ROW LEVEL SECURITY` as a safety net.
+
+#### Files created/modified
+- `nexus-app/src/main/resources/db/migration/V2__rls_policies.sql` — creates `nexus_app` role, enables RLS, creates tenant isolation policy
+- `nexus-app/src/main/resources/application-dev.yml` — split datasource: app uses `nexus_app`, Flyway uses `nexus`
+- `docker-compose.yml` — all host ports moved to high range (15432, 16379, 19092) to permanently avoid Windows Hyper-V port conflicts
+
+#### Decisions that matter
+
+**1. Two separate database roles:**
+`nexus` (owner) runs Flyway migrations — it can CREATE/ALTER/DROP tables. `nexus_app` (runtime) runs the app — it can only SELECT/INSERT/UPDATE/DELETE. This is the principle of least privilege. If the app is compromised, the attacker can't drop tables.
+
+**2. `SET LOCAL app.tenant_id` for tenant context:**
+`SET LOCAL` sets a transaction-scoped variable. It resets automatically when the transaction ends. This is critical for connection pooling: if the app uses HikariCP and reuses connections across requests, `SET LOCAL` ensures one tenant's context never leaks into another tenant's request.
+
+**3. `current_setting('app.tenant_id', true)` — the `true` parameter:**
+If the setting hasn't been set, `current_setting()` normally throws an error. The `true` parameter makes it return NULL instead. Since `tenant_id = NULL` is always false in SQL (NULL is not equal to anything), this means "if you forget to set tenant context, you see nothing." This is fail-closed — the safe default.
+
+**4. `WITH CHECK` on the policy:**
+`USING` filters rows on SELECT/UPDATE/DELETE. `WITH CHECK` validates rows on INSERT/UPDATE — it prevents a tenant from inserting a ticket with a different `tenant_id`. Both clauses use the same expression, ensuring no cross-tenant writes.
+
+**5. `FORCE ROW LEVEL SECURITY`:**
+By default, RLS doesn't apply to the table owner. `FORCE` makes it apply even to the owner. However, Postgres superusers always bypass RLS — this is a Postgres design decision. The `nexus` role in Docker Compose is a superuser, so it sees all rows regardless. The `nexus_app` role is NOT a superuser, so RLS works correctly for the app.
+
+**6. All Docker ports moved to high range:**
+Windows Hyper-V dynamically reserves port ranges that change on every reboot. Standard ports (5432, 6379, 9092) randomly fall into reserved ranges. Ports 15432, 16379, 19092 are high enough to avoid this permanently.
+
+#### Verification (RLS gate tests)
+1. `nexus_app` with no context → 0 rows (fail-closed) ✅
+2. `nexus_app` with Acme tenant → only Acme's tickets ✅
+3. `nexus_app` with Beta tenant → only Beta's ticket ✅
+4. `nexus` (superuser/owner) → all tickets visible (expected — superusers bypass RLS) ✅
+
+---
 
 *This document is updated every unit. Scroll to the bottom for the latest.*

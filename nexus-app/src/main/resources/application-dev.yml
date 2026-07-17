@@ -3,13 +3,14 @@
 # Connects to the local Docker Compose services (docker compose up -d).
 
 spring:
-  # ─── Datasource — points at local Docker Compose Postgres ──────────
+  # ─── Datasource — the RUNNING APP connects as nexus_app ────────────
+  # This is the low-privilege role created by V2__rls_policies.sql.
+  # RLS policies filter its queries by tenant_id automatically.
+  # Port 15432 = Docker Compose host port (avoids Hyper-V conflicts).
   datasource:
-    # Matches docker-compose.yml defaults:
-    #   POSTGRES_DB=nexus, POSTGRES_USER=nexus, POSTGRES_PASSWORD=nexus_local
-    url: jdbc:postgresql://localhost:5432/nexus
-    username: nexus
-    password: nexus_local
+    url: jdbc:postgresql://localhost:15432/nexus
+    username: nexus_app
+    password: nexus_app_local
     driver-class-name: org.postgresql.Driver
 
   # ─── JPA dev overrides ─────────────────────────────────────────────
@@ -22,8 +23,13 @@ spring:
         # Pretty-print the SQL so it's readable in the console.
         format_sql: true
 
-  # ─── Flyway dev overrides ──────────────────────────────────────────
+  # ─── Flyway — runs as the OWNER role (nexus), not the app role ─────
+  # Flyway needs DDL privileges to create/alter tables.
+  # The app role (nexus_app) only has CRUD permissions.
   flyway:
+    url: jdbc:postgresql://localhost:15432/nexus
+    user: nexus
+    password: nexus_local
     # In dev, wipe and re-run all migrations if they get out of sync.
     # NEVER enable this in prod — it drops the entire schema first.
     clean-disabled: false
