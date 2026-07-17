@@ -239,5 +239,199 @@ Since we didn't add the `mvnw` wrapper in previous units, the runner uses its gl
 The `grep` command searches the entire directory. If you add a markdown file (like this journal!) that contains the word "STUB:" as part of an explanation, the CI will fail because it matched the text in the documentation. We will likely need to refine the `grep` later to only search `.java` files (e.g., using `--include=\*.java`) if this becomes a nuisance.
 
 ---
+---
+
+## Phase 1 — Domain Model, Migrations, RLS
+
+### Unit 1: Domain Value Objects (Ticket Enums)
+
+#### Before code — what and why
+Before we can write a database table or a JPA entity, we need to define the vocabulary of the domain in pure Java. What statuses can a ticket have? What priorities? What categories? These enums are the building blocks everything else depends on — the Flyway migration will create columns matching these values, the REST API will validate against them, and the AI triage will assign them. They live in `com.nexus.ticket.domain` with zero framework imports, enforced by the ArchUnit test from Phase 0.
+
+#### Files created
+- `nexus-app/src/main/java/com/nexus/ticket/domain/TicketStatus.java` — the full lifecycle: NEW → CLASSIFIED → AI_DRAFTED → AUTO_RESOLVED | ESCALATED → IN_PROGRESS → RESOLVED → CLOSED
+- `nexus-app/src/main/java/com/nexus/ticket/domain/TicketPriority.java` — LOW, MEDIUM, HIGH, CRITICAL
+- `nexus-app/src/main/java/com/nexus/ticket/domain/TicketCategory.java` — BILLING, TECHNICAL, ACCOUNT, FEATURE_REQUEST, GENERAL
+
+#### Decisions that matter
+
+**1. Enums, not strings:**
+Storing ticket status as a string ("new", "classified") means a typo like "classifed" compiles fine and only fails at runtime — or worse, silently creates a new status nobody expected. Enums catch this at compile time. The database will store these as VARCHAR via `@Enumerated(EnumType.STRING)` in the JPA entity later, so the DB column is human-readable in raw queries.
+
+**2. Status enum names the states, doesn't enforce transitions:**
+`TicketStatus` only defines *what states exist*. The rule "a CLOSED ticket can't go back to NEW" will be enforced by a separate state machine class — not by the enum itself. This is the State pattern: the enum is the vocabulary, the state machine is the grammar.
+
+**3. Categories map to knowledge-base partitions:**
+When the AI triage classifies a ticket as `TECHNICAL`, the RAG pipeline searches the `TECHNICAL` partition of the tenant's knowledge base first. This improves retrieval relevance — a billing question shouldn't match technical documentation.
+
+**4. This is the first code in `com.nexus.ticket.domain`:**
+This creates the package structure the master spec (§3) requires: feature modules as top-level packages (`ticket`, `tenant`, `ai`), with `domain/application/infrastructure/api` nested inside each. The ArchUnit test now scans real domain classes, not just an empty package.
+
+#### What could go wrong
+If we add a new enum value later (e.g., `WAITING_ON_CUSTOMER`), the Flyway migration that creates the column won't know about it — we'd need a new migration to add it to any CHECK constraint, or use `EnumType.STRING` (which we will) so Postgres stores the raw string and accepts new values without a schema change.
+
+---
+
+### Unit 2: Flyway Baseline Migration (`V1__baseline_schema.sql`)
+
+#### Before code — what and why
+We have domain enums but no database tables. This unit creates the first Flyway migration — a versioned SQL script that builds the `tenants` and `tickets` tables. Flyway tracks which migrations have been applied, so a fresh database gets the exact same schema as everyone else's. We set `ddl-auto: validate` in Phase 0 for this reason — Hibernate never touches the schema, only Flyway does.
+
+#### Files created
+- `nexus-app/src/main/resources/db/migration/V1__baseline_schema.sql` — creates `tenants`, `tickets`, indexes, and enables pgvector extension
+
+#### Decisions that matter
+
+**1. `TIMESTAMPTZ`, not `TIMESTAMP`:**
+`TIMESTAMP` stores a date without timezone — if your server moves to a different timezone, every timestamp shifts. `TIMESTAMPTZ` stores an absolute point in time (internally always UTC), and Postgres converts to the session's timezone on display. For a multi-tenant SaaS with tenants in different timezones, this is non-negotiable.
+
+**2. `gen_random_uuid()` as default, not application-generated:**
+The database generates UUIDs, not Java. This means even raw SQL inserts get valid IDs, and there's no coordination needed between application instances. `gen_random_uuid()` is built into Postgres 13+, no extension needed.
+
+**3. `VARCHAR(50)` for enum columns, not Postgres `ENUM` type:**
+Postgres has a native `ENUM` type, but adding a new value to it requires `ALTER TYPE ... ADD VALUE` — which can't run inside a transaction. Using `VARCHAR` and storing the Java enum name as a string (`EnumType.STRING`) means adding a new enum value in Java is a code-only change, no migration needed.
+
+**4. Two indexes on `tenant_id`:**
+Every query in a multi-tenant system filters by `tenant_id`. Without an index, that's a full table scan on every request. The composite index `(tenant_id, status)` covers the most common dashboard query: "this tenant's tickets, filtered by status."
+
+**5. `ON DELETE CASCADE` on `tenant_id` FK:**
+If a tenant is deleted, all their tickets are deleted automatically. This prevents orphaned rows and simplifies tenant offboarding. In production you'd likely soft-delete tenants instead, but the FK constraint ensures referential integrity either way.
+
+**6. `CREATE EXTENSION IF NOT EXISTS vector`:**
+Enables pgvector now (Phase 0 uses the `pgvector/pgvector:pg16` image). We won't use embeddings until Phase 4, but enabling the extension in the baseline is free and means Phase 4's migration doesn't need to worry about it.
+
+#### Verification
+- Ran `mvn spring-boot:run -Dspring-boot.run.profiles=dev` — Flyway output: `Successfully applied 1 migration to schema "public", now at version v1`
+- Verified via `psql`: `tenants`, `tickets`, and `flyway_schema_history` tables exist with correct columns and indexes
+
+#### What could go wrong
+If someone edits this file after it's been applied, Flyway will detect the checksum mismatch and refuse to start the app — "Migration checksum mismatch." The fix is never editing an applied migration; write a new `V2__` instead. This is Flyway working correctly, not a bug.
+
+---
+---
+
+### Unit 3: JPA Entities (Infrastructure Layer)
+
+#### Before code — what and why
+We have domain enums (pure Java, no imports) and database tables (Flyway). Now we need the bridge: JPA entities — Java classes with `@Entity`, `@Table`, `@Column` that tell Hibernate how to map objects to rows. These live in `infrastructure.persistence`, NOT `domain`, because they carry `jakarta.persistence` imports. The dependency direction is infrastructure → domain (never the reverse). Since `ddl-auto: validate`, Hibernate checks these entities against the real schema at startup — any mismatch crashes the app immediately.
+
+#### Files created
+- `com.nexus.tenant.domain.PlanTier` — pure Java enum: FREE, STARTER, PROFESSIONAL, ENTERPRISE
+- `com.nexus.tenant.infrastructure.persistence.TenantEntity` — JPA entity → `tenants` table
+- `com.nexus.ticket.infrastructure.persistence.TicketEntity` — JPA entity → `tickets` table
+
+#### Decisions that matter
+
+**1. Infrastructure, not domain:**
+`@Entity` is a JPA annotation — it tells Hibernate "this class maps to a database table." That's a framework concern, not a business logic concern. The domain enums (`TicketStatus`, `PlanTier`) are imported BY the entity, but the domain never imports the entity. This is the Clean Architecture dependency rule: dependencies point inward.
+
+**2. `@Enumerated(EnumType.STRING)`, not `ORDINAL`:**
+`ORDINAL` stores the enum's position number (0, 1, 2...). If someone reorders the enum values, every row in the database silently means something different. `STRING` stores the actual name ("NEW", "CLASSIFIED"), so reordering is safe and raw SQL queries are human-readable.
+
+**3. `@Version` for optimistic locking:**
+The `version` field on `TicketEntity` enables optimistic locking. When Hibernate updates a ticket, it adds `WHERE version = ?` to the UPDATE statement. If two agents edit the same ticket simultaneously, the second one's WHERE clause fails (the version was already incremented), and Hibernate throws `OptimisticLockException`. This prevents silent overwrites without heavyweight row locks.
+
+**4. `FetchType.LAZY` on the tenant relationship:**
+Loading a ticket doesn't automatically load the full tenant object. Without LAZY, querying 100 tickets would fire 100 extra SQL queries to load their tenants (the N+1 problem). With LAZY, Hibernate only loads the tenant when you explicitly access it. The `getTenantId()` helper method extracts just the FK value without triggering a query.
+
+**5. No `@CreationTimestamp`/`@UpdateTimestamp`:**
+We set timestamps in the constructor and setters instead of using Hibernate's auto-timestamp annotations. This keeps the behavior explicit — you can see exactly when `updatedAt` gets set. The database also has `DEFAULT now()` as a fallback for raw SQL inserts.
+
+#### Verification
+- App booted with `dev` profile: Hibernate validated both entities against the schema — no errors
+- ArchUnit: 2/2 passed — `PlanTier` in `tenant.domain` has zero framework imports
+
+---
+---
+
+### Unit 4: RLS Policies + Low-Privilege App Role
+
+#### Before code — what and why
+Without RLS, a bug in the application code (forgetting a `WHERE tenant_id = ?`) leaks every tenant's data. RLS moves this protection into the database: Postgres automatically filters rows by `tenant_id`, even for queries that forgot to include the filter. Three things were needed: (1) a low-privilege `nexus_app` role (separate from the Flyway owner), (2) RLS policies on `tickets`, (3) `FORCE ROW LEVEL SECURITY` as a safety net.
+
+#### Files created/modified
+- `nexus-app/src/main/resources/db/migration/V2__rls_policies.sql` — creates `nexus_app` role, enables RLS, creates tenant isolation policy
+- `nexus-app/src/main/resources/application-dev.yml` — split datasource: app uses `nexus_app`, Flyway uses `nexus`
+- `docker-compose.yml` — all host ports moved to high range (15432, 16379, 19092) to permanently avoid Windows Hyper-V port conflicts
+
+#### Decisions that matter
+
+**1. Two separate database roles:**
+`nexus` (owner) runs Flyway migrations — it can CREATE/ALTER/DROP tables. `nexus_app` (runtime) runs the app — it can only SELECT/INSERT/UPDATE/DELETE. This is the principle of least privilege. If the app is compromised, the attacker can't drop tables.
+
+**2. `SET LOCAL app.tenant_id` for tenant context:**
+`SET LOCAL` sets a transaction-scoped variable. It resets automatically when the transaction ends. This is critical for connection pooling: if the app uses HikariCP and reuses connections across requests, `SET LOCAL` ensures one tenant's context never leaks into another tenant's request.
+
+**3. `current_setting('app.tenant_id', true)` — the `true` parameter:**
+If the setting hasn't been set, `current_setting()` normally throws an error. The `true` parameter makes it return NULL instead. Since `tenant_id = NULL` is always false in SQL (NULL is not equal to anything), this means "if you forget to set tenant context, you see nothing." This is fail-closed — the safe default.
+
+**4. `WITH CHECK` on the policy:**
+`USING` filters rows on SELECT/UPDATE/DELETE. `WITH CHECK` validates rows on INSERT/UPDATE — it prevents a tenant from inserting a ticket with a different `tenant_id`. Both clauses use the same expression, ensuring no cross-tenant writes.
+
+**5. `FORCE ROW LEVEL SECURITY`:**
+By default, RLS doesn't apply to the table owner. `FORCE` makes it apply even to the owner. However, Postgres superusers always bypass RLS — this is a Postgres design decision. The `nexus` role in Docker Compose is a superuser, so it sees all rows regardless. The `nexus_app` role is NOT a superuser, so RLS works correctly for the app.
+
+**6. All Docker ports moved to high range:**
+Windows Hyper-V dynamically reserves port ranges that change on every reboot. Standard ports (5432, 6379, 9092) randomly fall into reserved ranges. Ports 15432, 16379, 19092 are high enough to avoid this permanently.
+
+#### Verification (RLS gate tests)
+1. `nexus_app` with no context → 0 rows (fail-closed) ✅
+2. `nexus_app` with Acme tenant → only Acme's tickets ✅
+3. `nexus_app` with Beta tenant → only Beta's ticket ✅
+4. `nexus` (superuser/owner) → all tickets visible (expected — superusers bypass RLS) ✅
+
+---
+---
+
+### Unit 5: Ticket State Machine (Domain)
+
+#### Before code — what and why
+The `TicketStatus` enum from Unit 1 names the states but doesn't prevent illegal transitions (e.g., CLOSED → NEW). The state machine enforces the grammar: which transitions are legal. It's pure Java in the domain package — tested in milliseconds without Spring.
+
+#### Files created
+- `com.nexus.ticket.domain.TicketStateMachine` — static utility with `canTransition()`, `transition()`, `allowedTransitions()`, `isTerminal()`
+- `com.nexus.ticket.domain.TicketStateMachineTest` — 22 tests covering legal transitions, illegal transitions, terminal states
+
+#### Decisions that matter
+
+**1. Static methods, not instance:**
+The state machine has no mutable state — the transition table is a `static final` map. Making it a utility class with static methods means no wiring, no Spring bean, no lifecycle management. You just call `TicketStateMachine.canTransition(from, to)`.
+
+**2. `EnumMap` and `EnumSet`:**
+These are Java's special collections for enum keys/values. They use arrays internally instead of hash buckets, so lookups are O(1) with minimal memory overhead. For a state machine that's checked on every ticket update, this matters.
+
+**3. `transition()` throws `IllegalStateException`:**
+If a transition is illegal, the method throws with a descriptive message including the current state and what transitions ARE allowed. This gives clear errors in logs: "Illegal ticket transition: CLOSED → NEW. Allowed from CLOSED: []". The service layer will catch this and return a 400 Bad Request.
+
+**4. Test speed proves the architecture:**
+22 tests ran in 0.258s total — no Spring boot, no database. If the state machine imported JPA or Spring, these tests would need `@SpringBootTest` and take 5+ seconds. This is the concrete payoff of the domain purity rule.
+
+#### Verification
+- 22/22 tests pass (8 legal transitions, 9 illegal transitions, 2 terminal states, 1 query, 1 exception message, 1 ArchUnit)
+- ArchUnit: 2/2 pass — `TicketStateMachine` has zero framework imports
+
+---
+
+### Unit 6: Phase 1 Gate Verification & Closure
+
+#### What was verified
+- Full test suite: 22/22 pass (ArchUnit 2, state machine 20)
+- RLS manual tests: 4/4 pass (no-context=0 rows, Acme=2, Beta=1, owner=all)
+- Flyway V1+V2 applied cleanly, Hibernate validate passes
+- App boots on dev profile with split datasource (nexus_app for app, nexus for Flyway)
+- CURRENT_STATE.md updated with gate evidence
+
+#### Phase 1 summary — what was built
+1. **Domain vocabulary:** `TicketStatus` (8 states), `TicketPriority` (4 levels), `TicketCategory` (5 types), `PlanTier` (4 tiers) — all pure Java enums
+2. **Flyway migrations:** V1 (tenants + tickets tables), V2 (nexus_app role + RLS policies)
+3. **JPA entities:** `TenantEntity`, `TicketEntity` in infrastructure.persistence — bridge between domain and database
+4. **State machine:** `TicketStateMachine` — enforces legal transitions, tested with 20 domain tests in <0.3s
+5. **RLS:** `tenant_isolation` policy on tickets, fail-closed, `FORCE ROW LEVEL SECURITY`
+6. **Role separation:** `nexus` (owner/Flyway) vs `nexus_app` (runtime, RLS-filtered)
+
+#### Infrastructure fix
+All Docker Compose host ports moved to high range (15432/16379/19092) to permanently avoid Windows Hyper-V/WinNAT dynamic port reservation conflicts.
+
+---
 
 *This document is updated every unit. Scroll to the bottom for the latest.*
