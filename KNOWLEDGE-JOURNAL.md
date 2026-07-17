@@ -381,5 +381,35 @@ Windows Hyper-V dynamically reserves port ranges that change on every reboot. St
 4. `nexus` (superuser/owner) → all tickets visible (expected — superusers bypass RLS) ✅
 
 ---
+---
+
+### Unit 5: Ticket State Machine (Domain)
+
+#### Before code — what and why
+The `TicketStatus` enum from Unit 1 names the states but doesn't prevent illegal transitions (e.g., CLOSED → NEW). The state machine enforces the grammar: which transitions are legal. It's pure Java in the domain package — tested in milliseconds without Spring.
+
+#### Files created
+- `com.nexus.ticket.domain.TicketStateMachine` — static utility with `canTransition()`, `transition()`, `allowedTransitions()`, `isTerminal()`
+- `com.nexus.ticket.domain.TicketStateMachineTest` — 22 tests covering legal transitions, illegal transitions, terminal states
+
+#### Decisions that matter
+
+**1. Static methods, not instance:**
+The state machine has no mutable state — the transition table is a `static final` map. Making it a utility class with static methods means no wiring, no Spring bean, no lifecycle management. You just call `TicketStateMachine.canTransition(from, to)`.
+
+**2. `EnumMap` and `EnumSet`:**
+These are Java's special collections for enum keys/values. They use arrays internally instead of hash buckets, so lookups are O(1) with minimal memory overhead. For a state machine that's checked on every ticket update, this matters.
+
+**3. `transition()` throws `IllegalStateException`:**
+If a transition is illegal, the method throws with a descriptive message including the current state and what transitions ARE allowed. This gives clear errors in logs: "Illegal ticket transition: CLOSED → NEW. Allowed from CLOSED: []". The service layer will catch this and return a 400 Bad Request.
+
+**4. Test speed proves the architecture:**
+22 tests ran in 0.258s total — no Spring boot, no database. If the state machine imported JPA or Spring, these tests would need `@SpringBootTest` and take 5+ seconds. This is the concrete payoff of the domain purity rule.
+
+#### Verification
+- 22/22 tests pass (8 legal transitions, 9 illegal transitions, 2 terminal states, 1 query, 1 exception message, 1 ArchUnit)
+- ArchUnit: 2/2 pass — `TicketStateMachine` has zero framework imports
+
+---
 
 *This document is updated every unit. Scroll to the bottom for the latest.*
