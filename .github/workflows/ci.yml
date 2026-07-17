@@ -13,20 +13,21 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # 1. Lint/format check — fails fast if code isn't formatted correctly
-      # We'll use spotless or similar later, placeholder for now
       - name: Lint and Format Check
         run: echo "Linting check placeholder - will fail fast if format is wrong"
 
       # 2. Secret scan — prevents committing .env values or keys
+      # Uses gitleaks CLI directly (free, no license required)
       - name: Gitleaks Secret Scan
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz | tar xz
+          ./gitleaks detect --source . --verbose --no-git
 
       # 3. Unresolved marker grep — fails if any // STUB: remains in Java source
-      # Only searches .java files to avoid false positives from docs/CI config.
       - name: Check for unresolved STUBs
         run: |
           if grep -rnw --include='*.java' . -e 'STUB:'; then
@@ -47,11 +48,8 @@ jobs:
       # 4. Dependency vulnerability scan
       - name: Dependency Check
         run: echo "Dependency vulnerability scan placeholder"
-        # We'll wire up org.owasp:dependency-check-maven here later
 
-      # 5 & 6. Unit & Integration Tests 
-      # Runs ArchUnit (domain purity) and domain tests (state machine).
-      # No database needed — these are pure Java tests.
+      # 5 & 6. Unit & Integration Tests
       - name: Run Tests
         run: mvn test --no-transfer-progress
 
@@ -59,4 +57,4 @@ jobs:
       - name: Verify Docker Build
         run: echo "Docker build verification placeholder"
         
-      # Step 8 (Deploy to Render) will be added in Phase 9, strictly on push to main.
+      # Step 8 (Deploy to Render) will be added in Phase 9.
