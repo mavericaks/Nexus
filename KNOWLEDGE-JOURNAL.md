@@ -412,4 +412,26 @@ If a transition is illegal, the method throws with a descriptive message includi
 
 ---
 
+### Unit 6: Phase 1 Gate Verification & Closure
+
+#### What was verified
+- Full test suite: 22/22 pass (ArchUnit 2, state machine 20)
+- RLS manual tests: 4/4 pass (no-context=0 rows, Acme=2, Beta=1, owner=all)
+- Flyway V1+V2 applied cleanly, Hibernate validate passes
+- App boots on dev profile with split datasource (nexus_app for app, nexus for Flyway)
+- CURRENT_STATE.md updated with gate evidence
+
+#### Phase 1 summary — what was built
+1. **Domain vocabulary:** `TicketStatus` (8 states), `TicketPriority` (4 levels), `TicketCategory` (5 types), `PlanTier` (4 tiers) — all pure Java enums
+2. **Flyway migrations:** V1 (tenants + tickets tables), V2 (nexus_app role + RLS policies)
+3. **JPA entities:** `TenantEntity`, `TicketEntity` in infrastructure.persistence — bridge between domain and database
+4. **State machine:** `TicketStateMachine` — enforces legal transitions, tested with 20 domain tests in <0.3s
+5. **RLS:** `tenant_isolation` policy on tickets, fail-closed, `FORCE ROW LEVEL SECURITY`
+6. **Role separation:** `nexus` (owner/Flyway) vs `nexus_app` (runtime, RLS-filtered)
+
+#### Infrastructure fix
+All Docker Compose host ports moved to high range (15432/16379/19092) to permanently avoid Windows Hyper-V/WinNAT dynamic port reservation conflicts.
+
+---
+
 *This document is updated every unit. Scroll to the bottom for the latest.*
