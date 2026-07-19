@@ -469,4 +469,27 @@ All four classes live in `com.nexus.common.multitenancy` — cross-cutting infra
 
 ---
 
+### Unit 2: DTOs + Validation + Mapper
+
+#### What was built
+- `CreateTicketRequest.java` — inbound DTO, `@NotBlank` on subject, `@Size` limits
+- `UpdateTicketRequest.java` — inbound DTO, all fields optional (partial updates)
+- `TransitionTicketRequest.java` — inbound DTO for state transitions (separated from update because transitions go through state machine validation)
+- `TicketResponse.java` — outbound DTO (the only shape serialized to JSON)
+- `TicketMapper.java` — manual entity↔DTO conversion, static utility methods
+
+#### Why Java records
+All DTOs are `record` types — immutable, auto-generate `equals`/`hashCode`/`toString`, and have no boilerplate. Perfect for data carriers that don't need setters.
+
+#### Why manual mapper (not MapStruct)
+MapStruct is a compile-time code generator that auto-generates mapping code. We use manual mapping because: (a) transparent — you can step through it in the debugger, (b) no annotation-processor dependency, (c) our entity→DTO mapping is simple enough that auto-generation adds complexity without benefit.
+
+#### Package placement
+All DTOs in `com.nexus.ticket.application.dto` — the `application` layer sits between `domain` (pure Java) and `infrastructure` (JPA/Spring). DTOs live here because they're the API contract, not domain logic.
+
+#### Test results
+22/22 existing tests pass.
+
+---
+
 *This document is updated every unit. Scroll to the bottom for the latest.*
