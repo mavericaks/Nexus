@@ -492,4 +492,32 @@ All DTOs in `com.nexus.ticket.application.dto` — the `application` layer sits 
 
 ---
 
+### Unit 3: Custom Exceptions + Global Exception Handler
+
+#### What was built
+- `ErrorResponse.java` — standard JSON error shape (`status`, `error`, `message`, `timestamp`)
+- `TenantNotFoundException.java` — tenant ID not in DB → HTTP 404
+- `TicketNotFoundException.java` — ticket not found (or hidden by RLS) → HTTP 404
+- `IllegalTicketTransitionException.java` — state machine violation → HTTP 409 Conflict
+- `GlobalExceptionHandler.java` — `@RestControllerAdvice` mapping each exception to correct HTTP status
+
+#### Exception → HTTP status mapping
+| Exception | HTTP Status | When |
+|---|---|---|
+| `MethodArgumentNotValidException` | 400 Bad Request | Bean Validation fails (`@NotBlank`, `@Size`) |
+| `IllegalArgumentException` | 400 Bad Request | Invalid enum value (e.g., `category=INVALID`) |
+| `TenantNotFoundException` | 404 Not Found | Tenant ID not in database |
+| `TicketNotFoundException` | 404 Not Found | Ticket not found or hidden by RLS |
+| `IllegalTicketTransitionException` | 409 Conflict | State machine rejects transition |
+| `ObjectOptimisticLockingFailureException` | 409 Conflict | Concurrent edit on same ticket |
+| `Exception` (catch-all) | 500 Internal Server Error | Anything unexpected |
+
+#### Why 409 for transitions (not 400)
+400 = "your request is malformed" (bad syntax). 409 = "your request is valid but conflicts with the current state of the resource." An illegal transition is valid JSON with a real status name — it just can't be applied to *this* ticket in *this* state.
+
+#### Test results
+22/22 existing tests pass.
+
+---
+
 *This document is updated every unit. Scroll to the bottom for the latest.*
