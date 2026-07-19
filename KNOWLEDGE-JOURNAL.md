@@ -434,4 +434,39 @@ All Docker Compose host ports moved to high range (15432/16379/19092) to permane
 
 ---
 
+## Phase 2 — Core REST API: DTOs, Validation, Exception Handling, Tenant Context, CRUD
+
+### Unit 1: Tenant Context Filter (the RLS bridge)
+
+#### What was built
+- `TenantContext.java` — ThreadLocal holder for current tenant ID (`set`, `get`, `clear`)
+- `TenantContextFilter.java` — Servlet filter that extracts tenantId from URL path (`/api/v1/tenants/{tenantId}/...`), validates as UUID, stores in ThreadLocal
+- `TenantAwareDataSource.java` — DataSource wrapper using Java `Proxy` to intercept `setAutoCommit(false)` and inject `SET LOCAL app.tenant_id` into every transaction
+- `TenantDataSourceConfig.java` — BeanPostProcessor that wraps HikariCP DataSource with the tenant-aware version
+
+#### Why this design
+- `SET LOCAL` must run **inside** a transaction (not before it) — Postgres resets it on commit/rollback, so pooled connections never leak tenant context
+- `SET` (without LOCAL) would be session-scoped and **leak across requests** through HikariCP's connection pool — a real cross-tenant data breach
+- Java `Proxy` avoids implementing all ~60 Connection interface methods — only `setAutoCommit` is intercepted
+- UUID validation before string interpolation in `SET LOCAL` prevents SQL injection
+- Filter's `finally` block always calls `TenantContext.clear()` to prevent ThreadLocal leakage when Tomcat reuses threads
+
+#### The request flow
+```
+HTTP request → TenantContextFilter sets ThreadLocal
+  → @Transactional starts → setAutoCommit(false) intercepted
+    → SET LOCAL app.tenant_id = '...' executed
+      → Postgres RLS filters all queries automatically
+    → Transaction commits → SET LOCAL resets
+  → Filter finally block → TenantContext.clear()
+```
+
+#### Package placement
+All four classes live in `com.nexus.common.multitenancy` — cross-cutting infrastructure, not domain or ticket-specific.
+
+#### Test results
+22/22 existing tests pass (ArchUnit 2, state machine 20). No new tests needed for Unit 1 — the filter and DataSource wrapper will be exercised by integration tests in later units.
+
+---
+
 *This document is updated every unit. Scroll to the bottom for the latest.*
