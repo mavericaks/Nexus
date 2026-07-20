@@ -567,4 +567,57 @@ Every service method is `@Transactional`. When Spring starts the transaction, it
 
 ---
 
+### Unit 6: Controller Layer + Controller Tests
+
+#### What was built
+- `TicketController.java` — REST endpoints under `/api/v1/tenants/{tenantId}/tickets`
+- `TicketControllerTest.java` — 10 `@WebMvcTest` tests for HTTP layer
+
+#### Endpoint map
+| Method | Path | Status | Action |
+|---|---|---|---|
+| POST | `/tickets` | 201 Created | Create ticket |
+| GET | `/tickets` | 200 OK | List (paginated, filterable) |
+| GET | `/tickets/{id}` | 200 OK | Get one |
+| PUT | `/tickets/{id}` | 200 OK | Update fields |
+| PATCH | `/tickets/{id}/transition` | 200 OK | State transition |
+| DELETE | `/tickets/{id}` | 204 No Content | Delete |
+
+#### Why PATCH for transitions (not PUT)
+PUT replaces the entire resource. PATCH modifies one aspect (the status). A state transition is a partial update — it only changes the status field through the state machine.
+
+#### @WebMvcTest vs @SpringBootTest
+`@WebMvcTest(TicketController.class)` loads ONLY the web layer — controller + exception handler + filters. No database, no service beans. The service is mocked via `@MockitoBean`. Tests verify HTTP mechanics (status codes, validation, JSON shape), not business logic.
+
+#### Spring Boot 3.4+ breaking change
+`@MockBean` moved from `org.springframework.boot.test.mock.bean` to `@MockitoBean` in `org.springframework.test.context.bean.override.mockito`. This is a common migration gotcha in Spring Boot 3.4+.
+
+#### Test results
+44/44 total (22 domain + 12 service + 10 controller).
+
+---
+
+### Unit 7: Phase 2 Gate Verification
+
+#### E2E test results (app booted against Docker Compose)
+| Test | Result | Detail |
+|---|---|---|
+| POST create (Acme) | ✅ 201 | Returned ticket with status=NEW, priority=HIGH, category=TECHNICAL |
+| POST create (Beta) | ✅ 201 | Different tenant, separate ticket |
+| GET list (Acme) | ✅ 200 | Only Acme tickets returned (3), no Beta leakage — **RLS proven** |
+| PATCH transition (NEW→CLASSIFIED) | ✅ 200 | Status changed, updatedAt advanced |
+| PATCH illegal (CLASSIFIED→CLOSED) | ✅ 409 | State machine rejected it |
+| PUT update | ✅ 200 | Subject + priority changed, version incremented to 1 |
+| POST validation (empty subject) | ✅ 400 | Bean Validation rejected blank subject |
+| DELETE | ✅ 204 | Ticket gone, subsequent GET returns 404 |
+
+#### Phase 2 gate: PASSED ✅
+"Full CRUD ticket API works, unauthenticated" — confirmed.
+
+#### Test totals
+- **44 automated tests** (2 ArchUnit + 20 state machine + 12 service + 10 controller)
+- **8 manual E2E tests** against live Docker Compose + Postgres RLS
+
+---
+
 *This document is updated every unit. Scroll to the bottom for the latest.*
