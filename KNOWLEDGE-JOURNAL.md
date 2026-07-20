@@ -434,4 +434,190 @@ All Docker Compose host ports moved to high range (15432/16379/19092) to permane
 
 ---
 
+## Phase 2 — Core REST API: DTOs, Validation, Exception Handling, Tenant Context, CRUD
+
+### Unit 1: Tenant Context Filter (the RLS bridge)
+
+#### What was built
+- `TenantContext.java` — ThreadLocal holder for current tenant ID (`set`, `get`, `clear`)
+- `TenantContextFilter.java` — Servlet filter that extracts tenantId from URL path (`/api/v1/tenants/{tenantId}/...`), validates as UUID, stores in ThreadLocal
+- `TenantAwareDataSource.java` — DataSource wrapper using Java `Proxy` to intercept `setAutoCommit(false)` and inject `SET LOCAL app.tenant_id` into every transaction
+- `TenantDataSourceConfig.java` — BeanPostProcessor that wraps HikariCP DataSource with the tenant-aware version
+
+#### Why this design
+- `SET LOCAL` must run **inside** a transaction (not before it) — Postgres resets it on commit/rollback, so pooled connections never leak tenant context
+- `SET` (without LOCAL) would be session-scoped and **leak across requests** through HikariCP's connection pool — a real cross-tenant data breach
+- Java `Proxy` avoids implementing all ~60 Connection interface methods — only `setAutoCommit` is intercepted
+- UUID validation before string interpolation in `SET LOCAL` prevents SQL injection
+- Filter's `finally` block always calls `TenantContext.clear()` to prevent ThreadLocal leakage when Tomcat reuses threads
+
+#### The request flow
+```
+HTTP request → TenantContextFilter sets ThreadLocal
+  → @Transactional starts → setAutoCommit(false) intercepted
+    → SET LOCAL app.tenant_id = '...' executed
+      → Postgres RLS filters all queries automatically
+    → Transaction commits → SET LOCAL resets
+  → Filter finally block → TenantContext.clear()
+```
+
+#### Package placement
+All four classes live in `com.nexus.common.multitenancy` — cross-cutting infrastructure, not domain or ticket-specific.
+
+#### Test results
+22/22 existing tests pass (ArchUnit 2, state machine 20). No new tests needed for Unit 1 — the filter and DataSource wrapper will be exercised by integration tests in later units.
+
+---
+
+### Unit 2: DTOs + Validation + Mapper
+
+#### What was built
+- `CreateTicketRequest.java` — inbound DTO, `@NotBlank` on subject, `@Size` limits
+- `UpdateTicketRequest.java` — inbound DTO, all fields optional (partial updates)
+- `TransitionTicketRequest.java` — inbound DTO for state transitions (separated from update because transitions go through state machine validation)
+- `TicketResponse.java` — outbound DTO (the only shape serialized to JSON)
+- `TicketMapper.java` — manual entity↔DTO conversion, static utility methods
+
+#### Why Java records
+All DTOs are `record` types — immutable, auto-generate `equals`/`hashCode`/`toString`, and have no boilerplate. Perfect for data carriers that don't need setters.
+
+#### Why manual mapper (not MapStruct)
+MapStruct is a compile-time code generator that auto-generates mapping code. We use manual mapping because: (a) transparent — you can step through it in the debugger, (b) no annotation-processor dependency, (c) our entity→DTO mapping is simple enough that auto-generation adds complexity without benefit.
+
+#### Package placement
+All DTOs in `com.nexus.ticket.application.dto` — the `application` layer sits between `domain` (pure Java) and `infrastructure` (JPA/Spring). DTOs live here because they're the API contract, not domain logic.
+
+#### Test results
+22/22 existing tests pass.
+
+---
+
+### Unit 3: Custom Exceptions + Global Exception Handler
+
+#### What was built
+- `ErrorResponse.java` — standard JSON error shape (`status`, `error`, `message`, `timestamp`)
+- `TenantNotFoundException.java` — tenant ID not in DB → HTTP 404
+- `TicketNotFoundException.java` — ticket not found (or hidden by RLS) → HTTP 404
+- `IllegalTicketTransitionException.java` — state machine violation → HTTP 409 Conflict
+- `GlobalExceptionHandler.java` — `@RestControllerAdvice` mapping each exception to correct HTTP status
+
+#### Exception → HTTP status mapping
+| Exception | HTTP Status | When |
+|---|---|---|
+| `MethodArgumentNotValidException` | 400 Bad Request | Bean Validation fails (`@NotBlank`, `@Size`) |
+| `IllegalArgumentException` | 400 Bad Request | Invalid enum value (e.g., `category=INVALID`) |
+| `TenantNotFoundException` | 404 Not Found | Tenant ID not in database |
+| `TicketNotFoundException` | 404 Not Found | Ticket not found or hidden by RLS |
+| `IllegalTicketTransitionException` | 409 Conflict | State machine rejects transition |
+| `ObjectOptimisticLockingFailureException` | 409 Conflict | Concurrent edit on same ticket |
+| `Exception` (catch-all) | 500 Internal Server Error | Anything unexpected |
+
+#### Why 409 for transitions (not 400)
+400 = "your request is malformed" (bad syntax). 409 = "your request is valid but conflicts with the current state of the resource." An illegal transition is valid JSON with a real status name — it just can't be applied to *this* ticket in *this* state.
+
+#### Test results
+22/22 existing tests pass.
+
+---
+
+### Unit 4: Repository Layer + Specifications
+
+#### What was built
+- `TenantRepository.java` — `JpaRepository<TenantEntity, UUID>` for tenant existence checks
+- `TicketRepository.java` — `JpaRepository<TicketEntity, UUID>` + `JpaSpecificationExecutor` for dynamic filtering
+- `TicketSpecifications.java` — composable `Specification` lambdas for status, priority, category filters
+
+#### Why JpaSpecificationExecutor
+The ticket list endpoint supports optional filters (status, priority, category). With 3 optional filters, that's 8 possible combinations. Instead of writing 8 query methods, Specifications compose dynamically:
+```java
+Specification<TicketEntity> spec = Specification.where(null);
+if (status != null) spec = spec.and(hasStatus(status));
+if (priority != null) spec = spec.and(hasPriority(priority));
+repository.findAll(spec, pageable); // builds the WHERE clause at runtime
+```
+
+#### Why no WHERE tenant_id = ? in any query
+RLS handles tenant filtering at the Postgres level. Every query from `nexus_app` automatically has `WHERE tenant_id = current_setting('app.tenant_id')` appended by Postgres. The repository doesn't know about tenants at all.
+
+#### Test results
+22/22 existing tests pass. New integration tests for repositories come in Unit 6.
+
+---
+
+### Unit 5: Service Layer + Unit Tests
+
+#### What was built
+- `TicketService.java` — business logic: create, get, list (with filters + pagination), update (partial), transition (via state machine), delete
+- `TicketServiceTest.java` — 12 Mockito-based unit tests covering happy paths and error cases for all 5 operations
+
+#### How @Transactional triggers RLS
+Every service method is `@Transactional`. When Spring starts the transaction, it calls `setAutoCommit(false)` on the connection. Our `TenantAwareDataSource` intercepts this and runs `SET LOCAL app.tenant_id = '...'`. From that point, every query on that connection is filtered by RLS automatically. This is why the service code never mentions `tenant_id` in any query.
+
+#### State machine integration
+`transitionTicket()` calls `TicketStateMachine.transition(from, to)` from Phase 1. If the state machine throws `IllegalStateException`, the service catches it and throws `IllegalTicketTransitionException` instead — which the `GlobalExceptionHandler` maps to HTTP 409.
+
+#### Test approach
+- **Mockito** mocks repositories — no database needed, tests run in <2s
+- **@ExtendWith(MockitoExtension.class)** — no Spring context needed
+- Nested test classes group by operation: `CreateTicket`, `GetTicket`, `UpdateTicket`, `TransitionTicket`, `DeleteTicket`
+- Each has a happy path + at least one error case
+
+#### Test results
+34/34 total (22 existing + 12 new).
+
+---
+
+### Unit 6: Controller Layer + Controller Tests
+
+#### What was built
+- `TicketController.java` — REST endpoints under `/api/v1/tenants/{tenantId}/tickets`
+- `TicketControllerTest.java` — 10 `@WebMvcTest` tests for HTTP layer
+
+#### Endpoint map
+| Method | Path | Status | Action |
+|---|---|---|---|
+| POST | `/tickets` | 201 Created | Create ticket |
+| GET | `/tickets` | 200 OK | List (paginated, filterable) |
+| GET | `/tickets/{id}` | 200 OK | Get one |
+| PUT | `/tickets/{id}` | 200 OK | Update fields |
+| PATCH | `/tickets/{id}/transition` | 200 OK | State transition |
+| DELETE | `/tickets/{id}` | 204 No Content | Delete |
+
+#### Why PATCH for transitions (not PUT)
+PUT replaces the entire resource. PATCH modifies one aspect (the status). A state transition is a partial update — it only changes the status field through the state machine.
+
+#### @WebMvcTest vs @SpringBootTest
+`@WebMvcTest(TicketController.class)` loads ONLY the web layer — controller + exception handler + filters. No database, no service beans. The service is mocked via `@MockitoBean`. Tests verify HTTP mechanics (status codes, validation, JSON shape), not business logic.
+
+#### Spring Boot 3.4+ breaking change
+`@MockBean` moved from `org.springframework.boot.test.mock.bean` to `@MockitoBean` in `org.springframework.test.context.bean.override.mockito`. This is a common migration gotcha in Spring Boot 3.4+.
+
+#### Test results
+44/44 total (22 domain + 12 service + 10 controller).
+
+---
+
+### Unit 7: Phase 2 Gate Verification
+
+#### E2E test results (app booted against Docker Compose)
+| Test | Result | Detail |
+|---|---|---|
+| POST create (Acme) | ✅ 201 | Returned ticket with status=NEW, priority=HIGH, category=TECHNICAL |
+| POST create (Beta) | ✅ 201 | Different tenant, separate ticket |
+| GET list (Acme) | ✅ 200 | Only Acme tickets returned (3), no Beta leakage — **RLS proven** |
+| PATCH transition (NEW→CLASSIFIED) | ✅ 200 | Status changed, updatedAt advanced |
+| PATCH illegal (CLASSIFIED→CLOSED) | ✅ 409 | State machine rejected it |
+| PUT update | ✅ 200 | Subject + priority changed, version incremented to 1 |
+| POST validation (empty subject) | ✅ 400 | Bean Validation rejected blank subject |
+| DELETE | ✅ 204 | Ticket gone, subsequent GET returns 404 |
+
+#### Phase 2 gate: PASSED ✅
+"Full CRUD ticket API works, unauthenticated" — confirmed.
+
+#### Test totals
+- **44 automated tests** (2 ArchUnit + 20 state machine + 12 service + 10 controller)
+- **8 manual E2E tests** against live Docker Compose + Postgres RLS
+
+---
+
 *This document is updated every unit. Scroll to the bottom for the latest.*

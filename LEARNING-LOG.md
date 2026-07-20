@@ -28,3 +28,23 @@ Unit II :
 -Created Flyway Baseline Migration (V1__baseline_schema.sql) which creates the tenants and tickets tables . Used Flyway because schema change is version controlled and we can redeploy old version if needed . The baseline migration is used to create the schema that is already present in the database . Using ddl_auto : validate because hibernate shouldn't change the db for any typo .
 Unit III :
 -Created JPA Entities which is the bridge between domain and database . These entities are annotated with @Entity , @Table , @Column and @Version to tell Hibernate how to map objects to rows . These entities are in infrastructure.persistence package and not in domain package because they carry framework imports . @Version is used for optimistic locking and @Enumerated(EnumType.STRING) is used to store the enum values as strings in the database .
+Unit IV :
+-Created the core of the multi-tenancy security i.e., Row Level Security in Postgres to ensure cross-tenant data isolation without any code changes . Created tenant role with least privileges and nexus_app with CRUD and session context is set by setcontext() . This RLS is the single source of truth for data isolation . nexus_app role is RLS filtered and nexus is owner i.e., superuser .USING is used as READ Filter i.e., automatic WHERE clause and WITH CHECK is used as WRITE Filter i.e., automatic INSERT and UPDATE validation .
+Unit V :
+-Created the Ticket State Machine which is a pure java utility class that enforces the ticket lifecycle. It has static methods that check for valid transitions and return appropriate error messages. This is done to keep the code clean and fast to test.EnumMap is used to reduce the overhead of hashing in the hashmap .
+Unit VI :
+-Phase 1 Gate pass and verfication with Merge Pull Request for first milestone in Nexus Product v1.0.0
+
+Phase 2 : 
+Unit I :
+-We added thereal multitenancy by using TenantResolver which tells Spring Boot Multitenancy which tenant to use for the current request and TenantContext which stores the tenant id in a threadlocal and SessionScoped to share the tenant id across the request. Also added TenantContext to application.yml with 'no-tenant' default value.
+Unit II :
+-Created DTOs and validation using @NotBlank and @Size to validate the incoming requests and also created a manual mapper to map the DTOs to Entities and vice versa. Used java record which is immutable data carriers no setters and separate TransitionTicketRequest from UpdateTicketRequest to avoid lazy loaded leak from entity to API layer.
+Unit III :
+-Created global exception handling because Without a global handler, every controller method needs its own try/catch, and error responses look different everywhere. @ControllerAdvice centralizes error handling — one class maps each exception type to the correct HTTP status code and a consistent JSON error shape.
+Custom exceptions carry specific context (which tenant? which ticket? what transition was attempted?) so the error response tells the client exactly what went wrong, not just "500 Internal Server Error."
+@RestControllerAdvice = @ControllerAdvice + @ResponseBody. It intercepts exceptions from ALL controllers and returns JSON.
+Why custom exceptions instead of generic RuntimeException? — Each carries specific context (which tenant? which ticket? what transition?). The handler can then produce precise error messages.
+Why 409 Conflict for transitions? — 400 means "bad request format." 409 means "valid request but conflicts with the current resource state" — semantically more accurate for "you can't close a ticket that's already closed."
+Unit IV :
+-
