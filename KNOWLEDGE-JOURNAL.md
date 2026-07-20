@@ -544,4 +544,27 @@ RLS handles tenant filtering at the Postgres level. Every query from `nexus_app`
 
 ---
 
+### Unit 5: Service Layer + Unit Tests
+
+#### What was built
+- `TicketService.java` — business logic: create, get, list (with filters + pagination), update (partial), transition (via state machine), delete
+- `TicketServiceTest.java` — 12 Mockito-based unit tests covering happy paths and error cases for all 5 operations
+
+#### How @Transactional triggers RLS
+Every service method is `@Transactional`. When Spring starts the transaction, it calls `setAutoCommit(false)` on the connection. Our `TenantAwareDataSource` intercepts this and runs `SET LOCAL app.tenant_id = '...'`. From that point, every query on that connection is filtered by RLS automatically. This is why the service code never mentions `tenant_id` in any query.
+
+#### State machine integration
+`transitionTicket()` calls `TicketStateMachine.transition(from, to)` from Phase 1. If the state machine throws `IllegalStateException`, the service catches it and throws `IllegalTicketTransitionException` instead — which the `GlobalExceptionHandler` maps to HTTP 409.
+
+#### Test approach
+- **Mockito** mocks repositories — no database needed, tests run in <2s
+- **@ExtendWith(MockitoExtension.class)** — no Spring context needed
+- Nested test classes group by operation: `CreateTicket`, `GetTicket`, `UpdateTicket`, `TransitionTicket`, `DeleteTicket`
+- Each has a happy path + at least one error case
+
+#### Test results
+34/34 total (22 existing + 12 new).
+
+---
+
 *This document is updated every unit. Scroll to the bottom for the latest.*
