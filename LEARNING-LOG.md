@@ -33,4 +33,18 @@ Unit IV :
 Unit V :
 -Created the Ticket State Machine which is a pure java utility class that enforces the ticket lifecycle. It has static methods that check for valid transitions and return appropriate error messages. This is done to keep the code clean and fast to test.EnumMap is used to reduce the overhead of hashing in the hashmap .
 Unit VI :
+-Phase 1 Gate pass and verfication with Merge Pull Request for first milestone in Nexus Product v1.0.0
+
+Phase 2 : 
+Unit I :
+-We added thereal multitenancy by using TenantResolver which tells Spring Boot Multitenancy which tenant to use for the current request and TenantContext which stores the tenant id in a threadlocal and SessionScoped to share the tenant id across the request. Also added TenantContext to application.yml with 'no-tenant' default value.
+Unit II :
+-Created DTOs and validation using @NotBlank and @Size to validate the incoming requests and also created a manual mapper to map the DTOs to Entities and vice versa. Used java record which is immutable data carriers no setters and separate TransitionTicketRequest from UpdateTicketRequest to avoid lazy loaded leak from entity to API layer.
+Unit III :
+-Created global exception handling because Without a global handler, every controller method needs its own try/catch, and error responses look different everywhere. @ControllerAdvice centralizes error handling — one class maps each exception type to the correct HTTP status code and a consistent JSON error shape.
+Custom exceptions carry specific context (which tenant? which ticket? what transition was attempted?) so the error response tells the client exactly what went wrong, not just "500 Internal Server Error."
+@RestControllerAdvice = @ControllerAdvice + @ResponseBody. It intercepts exceptions from ALL controllers and returns JSON.
+Why custom exceptions instead of generic RuntimeException? — Each carries specific context (which tenant? which ticket? what transition?). The handler can then produce precise error messages.
+Why 409 Conflict for transitions? — 400 means "bad request format." 409 means "valid request but conflicts with the current resource state" — semantically more accurate for "you can't close a ticket that's already closed."
+Unit IV :
 -

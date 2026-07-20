@@ -520,4 +520,28 @@ All DTOs in `com.nexus.ticket.application.dto` — the `application` layer sits 
 
 ---
 
+### Unit 4: Repository Layer + Specifications
+
+#### What was built
+- `TenantRepository.java` — `JpaRepository<TenantEntity, UUID>` for tenant existence checks
+- `TicketRepository.java` — `JpaRepository<TicketEntity, UUID>` + `JpaSpecificationExecutor` for dynamic filtering
+- `TicketSpecifications.java` — composable `Specification` lambdas for status, priority, category filters
+
+#### Why JpaSpecificationExecutor
+The ticket list endpoint supports optional filters (status, priority, category). With 3 optional filters, that's 8 possible combinations. Instead of writing 8 query methods, Specifications compose dynamically:
+```java
+Specification<TicketEntity> spec = Specification.where(null);
+if (status != null) spec = spec.and(hasStatus(status));
+if (priority != null) spec = spec.and(hasPriority(priority));
+repository.findAll(spec, pageable); // builds the WHERE clause at runtime
+```
+
+#### Why no WHERE tenant_id = ? in any query
+RLS handles tenant filtering at the Postgres level. Every query from `nexus_app` automatically has `WHERE tenant_id = current_setting('app.tenant_id')` appended by Postgres. The repository doesn't know about tenants at all.
+
+#### Test results
+22/22 existing tests pass. New integration tests for repositories come in Unit 6.
+
+---
+
 *This document is updated every unit. Scroll to the bottom for the latest.*
