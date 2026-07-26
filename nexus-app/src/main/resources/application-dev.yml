@@ -33,3 +33,32 @@ spring:
     # In dev, wipe and re-run all migrations if they get out of sync.
     # NEVER enable this in prod — it drops the entire schema first.
     clean-disabled: false
+
+  # ─── OAuth2 — Google login ─────────────────────────────────────────
+  # Spring Security auto-configures the OAuth2 login flow from this.
+  # Redirect URI: http://localhost:8080/login/oauth2/code/google
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET}
+            scope: openid, email, profile
+
+# ─── Security — JWT configuration ──────────────────────────────────
+# HMAC-SHA256 secret must be at least 256 bits (32 bytes).
+# This is a DEV-ONLY key — production would use env variable / Vault.
+nexus:
+  security:
+    jwt:
+      secret: nexus-dev-secret-key-must-be-at-least-32-bytes-long!!
+      expiration-hours: 24
+      issuer: nexus-dev
+    # Owner datasource — used ONLY for auth queries (login) that need
+    # to bypass RLS. The app role (nexus_app) has RLS enforced, but
+    # during login we don't know the tenant yet.
+    auth-datasource:
+      url: jdbc:postgresql://localhost:15432/nexus
+      username: nexus
+      password: nexus_local

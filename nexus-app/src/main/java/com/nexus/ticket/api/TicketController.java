@@ -6,6 +6,7 @@ import com.nexus.ticket.application.dto.TicketResponse;
 import com.nexus.ticket.application.dto.TransitionTicketRequest;
 import com.nexus.ticket.application.dto.UpdateTicketRequest;
 import jakarta.validation.Valid;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
@@ -45,6 +46,13 @@ import java.util.UUID;
  *   <li>{@code PATCH  /api/v1/tenants/{tenantId}/tickets/{ticketId}/transition} — state transition</li>
  *   <li>{@code DELETE /api/v1/tenants/{tenantId}/tickets/{ticketId}}   — delete</li>
  * </ul>
+ *
+ * <p><b>RBAC role matrix:</b></p>
+ * <ul>
+ *   <li>{@code ROLE_AGENT}  — create, read, update, transition</li>
+ *   <li>{@code ROLE_ADMIN}  — all of AGENT + delete</li>
+ *   <li>{@code ROLE_OWNER}  — all (same as ADMIN)</li>
+ * </ul>
  */
 @RestController
 @RequestMapping("/api/v1/tenants/{tenantId}/tickets")
@@ -58,10 +66,12 @@ public class TicketController {
 
     /**
      * Create a new ticket for the given tenant.
+     * Any authenticated user (AGENT, ADMIN, OWNER) can create tickets.
      *
      * @return 201 Created with the ticket response body
      */
     @PostMapping
+    @PreAuthorize("hasAnyRole('AGENT', 'ADMIN', 'OWNER')")
     public ResponseEntity<TicketResponse> createTicket(
             @PathVariable UUID tenantId,
             @Valid @RequestBody CreateTicketRequest request) {
@@ -86,6 +96,7 @@ public class TicketController {
      * @return 200 OK with a paginated list of tickets
      */
     @GetMapping
+    @PreAuthorize("hasAnyRole('AGENT', 'ADMIN', 'OWNER')")
     public ResponseEntity<Page<TicketResponse>> listTickets(
             @PathVariable UUID tenantId,
             @RequestParam(required = false) String status,
@@ -103,6 +114,7 @@ public class TicketController {
      * @return 200 OK with the ticket, or 404 if not found / hidden by RLS
      */
     @GetMapping("/{ticketId}")
+    @PreAuthorize("hasAnyRole('AGENT', 'ADMIN', 'OWNER')")
     public ResponseEntity<TicketResponse> getTicket(
             @PathVariable UUID tenantId,
             @PathVariable UUID ticketId) {
@@ -117,6 +129,7 @@ public class TicketController {
      * @return 200 OK with the updated ticket
      */
     @PutMapping("/{ticketId}")
+    @PreAuthorize("hasAnyRole('AGENT', 'ADMIN', 'OWNER')")
     public ResponseEntity<TicketResponse> updateTicket(
             @PathVariable UUID tenantId,
             @PathVariable UUID ticketId,
@@ -136,6 +149,7 @@ public class TicketController {
      * @return 200 OK with the transitioned ticket, or 409 if the transition is illegal
      */
     @PatchMapping("/{ticketId}/transition")
+    @PreAuthorize("hasAnyRole('AGENT', 'ADMIN', 'OWNER')")
     public ResponseEntity<TicketResponse> transitionTicket(
             @PathVariable UUID tenantId,
             @PathVariable UUID ticketId,
@@ -147,10 +161,12 @@ public class TicketController {
 
     /**
      * Delete a ticket.
+     * Only ADMIN and OWNER can delete — AGENT cannot.
      *
      * @return 204 No Content on success, 404 if not found
      */
     @DeleteMapping("/{ticketId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
     public ResponseEntity<Void> deleteTicket(
             @PathVariable UUID tenantId,
             @PathVariable UUID ticketId) {

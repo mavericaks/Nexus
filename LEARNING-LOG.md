@@ -47,4 +47,72 @@ Custom exceptions carry specific context (which tenant? which ticket? what trans
 Why custom exceptions instead of generic RuntimeException? — Each carries specific context (which tenant? which ticket? what transition?). The handler can then produce precise error messages.
 Why 409 Conflict for transitions? — 400 means "bad request format." 409 means "valid request but conflicts with the current resource state" — semantically more accurate for "you can't close a ticket that's already closed."
 Unit IV :
+-Created JPA Repositories for basic CRUD operations + specification executor for dynamic queries. No WHERE clause with tenant_id as RLS handles it at Postgres level . JpaSpecificationExecutor enables dynamic queries based on the filters passed in the request. JpaSpecificationExecutor is a Spring Data JPA interface that allows you to execute dynamic queries based on the filters passed in the request.
+Unit V :
+-Created the Service Layer + Unit Tests . The service layer is where business logic lives. It orchestrates: validate tenant exists → create/update/transition entity → use state machine → persist → return DTO. Controllers call services, services call repositories. Services are @Transactional so the entire operation succeeds or fails atomically — and that's what triggers our TenantAwareDataSource to inject SET LOCAL.
+Unit VI :
+-Created The controller is the thin HTTP layer — it receives requests, validates input (@Valid), delegates to the service, and returns the response. Controllers should be dumb: no business logic, no direct repository calls. Just HTTP mapping.
+HTTP request
+  → TenantContextFilter (extracts tenantId, sets ThreadLocal)
+    → TicketController (validates @Valid, delegates to service)
+      → TicketService (@Transactional → SET LOCAL fires)
+        → TicketRepository (RLS filters queries)
+          → Postgres (returns only current tenant's rows)
+        → TicketMapper (entity → DTO)
+      → GlobalExceptionHandler (catches errors → correct HTTP status)
+    → JSON response
+Unit VII :
+-E2E test results (app booted against Docker Compose)
+| Test | Result | Detail |
+|---|---|---|
+| POST create (Acme) | ✅ 201 | Returned ticket with status=NEW, priority=HIGH, category=TECHNICAL |
+| POST create (Beta) | ✅ 201 | Different tenant, separate ticket |
+| GET list (Acme) | ✅ 200 | Only Acme tickets returned (3), no Beta leakage — **RLS proven** |
+| PATCH transition (NEW→CLASSIFIED) | ✅ 200 | Status changed, updatedAt advanced |
+| PATCH illegal (CLASSIFIED→CLOSED) | ✅ 409 | State machine rejected it |
+| PUT update | ✅ 200 | Subject + priority changed, version incremented to 1 |
+| POST validation (empty subject) | ✅ 400 | Bean Validation rejected blank subject |
+| DELETE | ✅ 204 | Ticket gone, subsequent GET returns 404 |
+
+Phase 3 :
+
+Unit I :
+-Created SecurityConfig.java to centralize security configuration. Disables CSRF and configures stateless sessions. Configures JWT decoder using HMAC-SHA256. Sets up BCrypt password encoder. Enables method-level security.
+
+Unit II :
+-Created JWT Token Provider which generates signed JWT tokens for authenticated users.
+-Created Auth Controller which handles email/password login requests and returns JWT tokens.
+-Created NexusUserDetails which is a custom UserDetails implementation.
+-Created LoginRequest and LoginResponse DTOs.
+-Created GlobalExceptionHandler which handles BadCredentialsException and AccessDeniedException.
+
+Unit III :
+-Key learning: The RLS vs Login chicken-and-egg problem — during login you don't have a tenant context, so RLS blocks user lookup. Solution: a secondary DataSource running as DB owner, used only for the login query.
+-Created OAuth2LoginSuccessHandler.java — handles Google auth callback, issues our JWT
+-Created application-dev.yml — Google OAuth2 client-id/secret config
+-Created SecurityConfig.java — added oauth2Login() with custom success handler
+-Created application.yml (test) — dummy OAuth2 config so tests don't fail
+
+#### The OAuth2 → JWT token exchange flow
+```
+User → GET /oauth2/authorization/google
+     → Google login page
+     → Google redirects to /login/oauth2/code/google
+     → Spring exchanges auth code for Google tokens + user info (OIDC)
+     → OAuth2LoginSuccessHandler:
+         1. Extract Google email from OidcUser
+         2. Look up email in our users table (bypass RLS via authDataSource)
+         3. If user exists → issue our JWT with tenantId + roles
+         4. If not → 403 "No Nexus account linked to this email"
+     → Return JWT as JSON
+```
+
+#### Why NOT auto-create users on Google login?
+In B2B SaaS, tenant admins control who has access. A random Google user shouldn't get an account just by clicking "Sign in with Google." The admin pre-creates users (with email + role), then the user can sign in via Google. This is the "account linking" pattern.
+
+#### Why IF_REQUIRED sessions instead of STATELESS?
+
+The OAuth2 redirect flow needs temporary session state — Google sends the user to a consent page and back. Spring stores a "state" parameter in the session to validate the callback isn't forged (CSRF protection for OAuth). API requests still use JWT (no sessions).
+
+Unit IV :
 -

@@ -620,4 +620,283 @@ PUT replaces the entire resource. PATCH modifies one aspect (the status). A stat
 
 ---
 
+## Phase 3 — Security: JWT, OAuth2, RBAC
+
+### Unit 1: Dependencies + Security Config Skeleton
+
+#### What was built
+- Added 4 dependencies: `spring-boot-starter-security`, `oauth2-resource-server`, `oauth2-client`, `spring-security-test`
+- `SecurityConfig.java` — central security config: stateless sessions, CSRF disabled, JWT decoder/encoder, BCrypt, `@EnableMethodSecurity`
+- `application-dev.yml` — JWT secret, expiration, issuer config
+- `application.yml` (test) — test JWT config so `@WebMvcTest` doesn't fail
+- Fixed `TicketControllerTest` with `@AutoConfigureMockMvc(addFilters=false)` to bypass security in existing tests
+
+#### Why stateless sessions
+REST APIs don't use cookies or HTTP sessions. Each request carries its own JWT token in the `Authorization: Bearer ...` header. This means any server instance can validate any request — horizontal scaling without sticky sessions.
+
+#### Why CSRF disabled
+CSRF attacks exploit cookie-based sessions (the browser automatically sends the cookie). Since we're stateless (no cookies), CSRF doesn't apply. Enabling it would require every client to fetch a CSRF token before POST requests — unnecessary complexity for a token-based API.
+
+#### Why HMAC-SHA256 (symmetric) instead of RSA (asymmetric)
+HMAC is simpler: one shared secret both signs and verifies. RSA uses a private/public key pair — the signer keeps the private key, verifiers only need the public key. For a single-service deployment like Nexus, HMAC is sufficient. If we ever split into microservices, RSA would let each service verify tokens without having the signing key.
+
+#### Test results
+44/44 existing tests pass (security bypassed in controller tests).
+
+### Unit 2: JWT Token Provider + Auth Controller
+
+#### What was built
+- `JwtProperties.java` — `@ConfigurationProperties` for JWT secret, expiration, issuer
+- `JwtTokenProvider.java` — generates signed JWT tokens with userId, tenantId, roles
+- `AuthController.java` — `POST /api/v1/auth/login` → email/password → JWT token
+- `NexusUserDetails.java` — custom `UserDetails` carrying tenantId + userId
+- `LoginRequest.java` / `LoginResponse.java` — auth DTOs
+- `GlobalExceptionHandler` — added `BadCredentialsException` (401) and `AccessDeniedException` (403)
+- `JwtTokenProviderTest.java` — 4 new tests
+
+#### Gotcha: NimbusJwtEncoder key selection
+`NimbusJwtEncoder` doesn't just "use whatever key you give it." It has a key selection process:
+1. It looks at the JWS header (algorithm: HS256/RS256/etc.)
+2. It queries the JWK source for keys matching that algorithm
+3. If no match, it throws "Failed to select a JWK signing key"
+
+**Fix:** Two things needed:
+1. Build `OctetSequenceKey` with `.algorithm(JWSAlgorithm.HS256).keyID("nexus")` — so the key is selectable
+2. Pass `JwsHeader.with(MacAlgorithm.HS256)` when encoding — so the encoder knows what algorithm to match against
+
+Without both, the encoder defaults to looking for RSA keys and finds nothing.
+
+#### Login flow (once UserDetailsService exists in Unit 3+)
+1. Client sends `POST /api/v1/auth/login` with email + password
+2. `AuthenticationManager` → `UserDetailsService` → loads user → BCrypt compares
+3. If valid → `JwtTokenProvider.generateToken()` → signed JWT
+4. Client stores JWT, sends in `Authorization: Bearer ...` on subsequent requests
+5. Spring Security's `BearerTokenAuthenticationFilter` validates automatically
+
+#### Test results
+48/48 total (44 existing + 4 new JWT tests).
+
+### Unit 3: User/Role Model + Flyway Migration + UserDetailsService
+
+#### What was built
+- `V3__users_and_roles.sql` — `users` + `user_roles` tables, RLS policies, 3 seed demo users
+- `UserEntity.java` — JPA entity with `@ElementCollection` for roles (EAGER fetch)
+- `UserRole.java` — enum: `ROLE_OWNER`, `ROLE_ADMIN`, `ROLE_AGENT`
+- `UserRepository.java` — `findByEmail()`
+- `NexusUserDetailsService.java` — loads users via direct JDBC (bypasses RLS)
+- `AuthDataSourceConfig.java` — secondary DataSource using DB owner role
+
+#### The RLS vs Login chicken-and-egg problem
+During login, we don't know the tenant yet (the user hasn't authenticated). But RLS on the `users` table requires `app.tenant_id` to be set. If we use the normal DataSource (`nexus_app`), RLS filters out ALL users — nobody can log in.
+
+**Fix:** A secondary DataSource (`authDataSource`) that connects as the DB owner (`nexus`), which bypasses RLS. Used **only** by `NexusUserDetailsService` for the login query. This is safe because:
+1. We're only reading one user row by email — no multi-tenant data to leak
+2. The email is globally unique — there's exactly one match
+3. After login, all subsequent requests use the normal RLS-restricted DataSource
+
+#### Why @ElementCollection instead of a Role entity
+Roles are simple enum values, not entities with their own lifecycle. `@ElementCollection` stores them in a join table (`user_roles`) without needing a full JPA entity. Fetched EAGER since roles are always needed for security checks.
+
+#### Seed users (all use password: `password123`)
+| Email | Tenant | Role |
+|---|---|---|
+| owner@acme.com | Acme Corp | ROLE_OWNER |
+| agent@acme.com | Acme Corp | ROLE_AGENT |
+| admin@beta.com | Beta Inc | ROLE_ADMIN |
+
+#### Test results
+48/48 tests pass (no new tests in this unit — testing happens in Unit 6).
+
+### Unit 3b: Google OAuth2 Login
+
+#### What was built
+- `OAuth2LoginSuccessHandler.java` — handles Google auth callback, issues our JWT
+- `application-dev.yml` — Google OAuth2 client-id/secret config
+- `SecurityConfig.java` — added `oauth2Login()` with custom success handler
+- `application.yml (test)` — dummy OAuth2 config so tests don't fail
+
+#### The OAuth2 → JWT token exchange flow
+```
+User → GET /oauth2/authorization/google
+     → Google login page
+     → Google redirects to /login/oauth2/code/google
+     → Spring exchanges auth code for Google tokens + user info (OIDC)
+     → OAuth2LoginSuccessHandler:
+         1. Extract Google email from OidcUser
+         2. Look up email in our users table (bypass RLS via authDataSource)
+         3. If user exists → issue our JWT with tenantId + roles
+         4. If not → 403 "No Nexus account linked to this email"
+     → Return JWT as JSON
+```
+
+#### Why NOT auto-create users on Google login?
+In B2B SaaS, tenant admins control who has access. A random Google user shouldn't get an account just by clicking "Sign in with Google." The admin pre-creates users (with email + role), then the user can sign in via Google. This is the "account linking" pattern.
+
+#### Why IF_REQUIRED sessions instead of STATELESS?
+The OAuth2 redirect flow needs temporary session state — Google sends the user to a consent page and back. Spring stores a "state" parameter in the session to validate the callback isn't forged (CSRF protection for OAuth). API requests still use JWT (no sessions).
+
+#### Test results
+48/48 tests pass.
+
+### Unit 4: RBAC (@PreAuthorize) + JWT Tenant Validation
+
+#### What was built
+- `TicketController.java` — added `@PreAuthorize` annotations on every endpoint
+- `TenantContextFilter.java` — upgraded to extract tenantId from JWT claims + validate against URL
+
+#### RBAC role matrix
+| Action | AGENT | ADMIN | OWNER |
+|---|:---:|:---:|:---:|
+| Create ticket | ✅ | ✅ | ✅ |
+| List tickets | ✅ | ✅ | ✅ |
+| Get ticket | ✅ | ✅ | ✅ |
+| Update ticket | ✅ | ✅ | ✅ |
+| Transition ticket | ✅ | ✅ | ✅ |
+| **Delete ticket** | ❌ | ✅ | ✅ |
+
+#### Cross-tenant attack prevention
+```
+JWT says: tenantId = "acme-uuid"
+URL says: /api/v1/tenants/beta-uuid/tickets
+
+TenantContextFilter detects mismatch → 403 Forbidden
+"Tenant mismatch: your account belongs to a different tenant."
+```
+
+Without this check, a malicious user could authenticate as tenant A but request tenant B's data through the URL. The filter validates that the JWT tenant matches the URL tenant before setting the RLS context.
+
+#### Why `hasAnyRole` not `hasRole`?
+Spring's `hasRole("ADMIN")` automatically prepends `ROLE_` → matches `ROLE_ADMIN`. `hasAnyRole("ADMIN", "OWNER")` does the same for both. Our roles are stored as `ROLE_ADMIN` in the DB, so this convention works seamlessly.
+
+#### Test results
+48/48 tests pass. Existing tests bypass security filters via `@AutoConfigureMockMvc(addFilters=false)`. New RBAC-specific tests will come in Unit 5.
+
+### Unit 5: Security Tests + Gate Verification
+
+#### What was built
+- `TicketSecurityTest.java` — 13 tests covering unauthenticated access, RBAC enforcement, cross-tenant protection, and authenticated happy paths
+- `SecurityConfig.java` — added `BearerTokenAuthenticationEntryPoint` for `/api/**` and `JwtAuthenticationConverter` for custom role claims
+- `TenantContextFilter.java` — changed filter ordering from `HIGHEST_PRECEDENCE` to `@Order(0)`
+
+#### The three hardest bugs and why they happened
+
+**Bug 1: Unauthenticated API requests returned 302 instead of 401**
+
+When `oauth2Login()` is configured, Spring registers a `LoginUrlAuthenticationEntryPoint` that redirects *all* unauthenticated requests to Google's login page. This is correct for browser-initiated flows but wrong for API calls — API clients expect a `401` with a `WWW-Authenticate: Bearer` header, not a redirect.
+
+**Fix:** `defaultAuthenticationEntryPointFor()` with an `AntPathRequestMatcher`:
+```java
+.exceptionHandling(ex -> ex
+    .defaultAuthenticationEntryPointFor(
+        new BearerTokenAuthenticationEntryPoint(),
+        new AntPathRequestMatcher("/api/**")))
+```
+This tells Spring: "for requests matching `/api/**`, use the Bearer entry point (401). For everything else (browser OAuth), fall through to the default redirect."
+
+**Bug 2: `@PreAuthorize` saw no roles — `hasAnyRole('ADMIN')` always failed**
+
+Spring's default `JwtAuthenticationConverter` reads authorities from the `scope` claim. But our JWTs store roles in a custom `roles` claim (e.g., `["ROLE_ADMIN"]`). Without a custom converter, the decoded JWT had *zero* authorities — every `@PreAuthorize` check failed.
+
+**Fix:** Custom `JwtAuthenticationConverter` + `JwtGrantedAuthoritiesConverter`:
+```java
+@Bean
+public JwtAuthenticationConverter jwtAuthenticationConverter() {
+    var grantedAuthoritiesConverter = new JwtGrantedAuthoritiesConverter();
+    grantedAuthoritiesConverter.setAuthoritiesClaimName("roles");
+    grantedAuthoritiesConverter.setAuthorityPrefix(""); // roles already have ROLE_ prefix
+
+    var converter = new JwtAuthenticationConverter();
+    converter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter);
+    return converter;
+}
+```
+
+This is needed in **both** the real `SecurityConfig` and any test security configurations.
+
+**Bug 3: Cross-tenant validation always passed (never saw JWT claims)**
+
+`TenantContextFilter` was running at `@Order(Ordered.HIGHEST_PRECEDENCE)` — *before* Spring Security's filter chain (which runs at order `-100`). The SecurityContext was empty when the filter tried to read JWT claims, so `extractTenantIdFromJwt()` always returned `null` and the cross-tenant check was silently skipped.
+
+**Fix:** Changed to `@Order(0)`:
+```java
+@Component
+@Order(0)  // After Spring Security's filter chain (-100)
+public class TenantContextFilter implements Filter { ... }
+```
+
+#### Why `@WebMvcTest` + security is tricky
+
+`@WebMvcTest` only loads the web slice (controllers + filters). It does NOT scan `@Component` beans from other packages. This means:
+
+| Bean | Scanned? | Solution |
+|---|:---:|---|
+| `TicketController` | ✅ | Listed in `@WebMvcTest(TicketController.class)` |
+| `SecurityConfig` | ❌ | Need `@Import(SecurityConfig.class)` |
+| `OAuth2LoginSuccessHandler` | ❌ | Need `@MockitoBean` |
+| `NexusUserDetailsService` | ❌ | Need `@MockitoBean` |
+| `authDataSource` | ❌ | Need `@MockitoBean(name = "authDataSource")` |
+
+Without `@Import(SecurityConfig.class)`, `@EnableMethodSecurity` wasn't active, so `@PreAuthorize` annotations were silently ignored — every request sailed through regardless of role.
+
+#### Spring Security Test's `jwt()` post-processor
+
+Instead of generating real signed JWT tokens in tests (which requires encoders, keys, and matching decoders), Spring provides `SecurityMockMvcRequestPostProcessors.jwt()`:
+
+```java
+mockMvc.perform(get("/api/v1/tenants/{id}/tickets", TENANT_ID)
+    .with(jwt().jwt(j -> j
+        .claim("tenantId", TENANT_ID.toString())
+        .subject("agent@acme.com"))
+        .authorities(new SimpleGrantedAuthority("ROLE_AGENT"))))
+    .andExpect(status().isOk());
+```
+
+This injects a mock `JwtAuthenticationToken` directly into the `SecurityContext` — no encoding, no decoding, no secret key needed. You control exactly what claims and authorities the controller sees. The mock JWT is invisible to filters that run before the security chain, but visible to everything after (controllers, `@PreAuthorize`, `TenantContextFilter`).
+
+#### The two test classes and their different purposes
+
+| | `TicketControllerTest` | `TicketSecurityTest` |
+|---|---|---|
+| **Security filters** | OFF (`addFilters=false`) | ON (default) |
+| **Tests what** | HTTP mapping, validation, JSON serialization | RBAC, auth, cross-tenant |
+| **Token handling** | None (no auth required) | `jwt()` post-processor |
+| **MockBeans** | `TicketService` only | `TicketService` + security beans |
+| **Test count** | 17 tests | 13 tests |
+
+#### Filter ordering mental model
+```
+Request arrives
+    ↓
+┌─────────────────────────────────┐
+│ Spring Security Filter Chain    │  @Order(-100)
+│   - OAuth2LoginFilter           │
+│   - BearerTokenAuthFilter       │  ← Validates JWT, populates SecurityContext
+│   - ExceptionTranslation        │  ← 401 for /api/**, 302 for browser
+│   - AuthorizationFilter         │  ← @PreAuthorize checks
+└─────────────────────────────────┘
+    ↓
+┌─────────────────────────────────┐
+│ TenantContextFilter             │  @Order(0)
+│   - Reads JWT tenantId from     │
+│     SecurityContext              │
+│   - Compares to URL tenantId    │
+│   - Sets RLS context via        │
+│     SET app.current_tenant_id   │
+└─────────────────────────────────┘
+    ↓
+┌─────────────────────────────────┐
+│ DispatcherServlet               │
+│   → TicketController            │
+└─────────────────────────────────┘
+```
+
+#### Phase 3 gate check ✅
+> *"Same API now requires auth; role checks enforced and tested"*
+
+- **61 total tests, 0 failures**
+- 13 security-specific tests covering all RBAC, auth, and cross-tenant paths
+- Existing 48 tests continue to pass (they bypass security filters to test pure HTTP mapping)
+
+---
+
 *This document is updated every unit. Scroll to the bottom for the latest.*

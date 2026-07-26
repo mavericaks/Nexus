@@ -1,0 +1,21 @@
+# Test configuration — used by @WebMvcTest and @SpringBootTest
+# Provides the JWT secret so SecurityConfig can initialize
+
+nexus:
+  security:
+    jwt:
+      secret: test-secret-key-must-be-at-least-32-bytes-long-for-hs256!!
+      expiration-hours: 1
+      issuer: nexus-test
+
+# Dummy OAuth2 config — prevents Spring from failing at startup
+# when it auto-configures the OAuth2 client.
+# These values are never actually used (tests bypass security filters).
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: test-client-id
+            client-secret: test-client-secret

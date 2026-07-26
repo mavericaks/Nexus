@@ -4,6 +4,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -25,6 +27,8 @@ import java.util.stream.Collectors;
  *   <li>Ticket not found → 404 Not Found</li>
  *   <li>Illegal state transition → 409 Conflict</li>
  *   <li>Optimistic lock conflict → 409 Conflict</li>
+ *   <li>Bad credentials (wrong password) → 401 Unauthorized</li>
+ *   <li>Access denied (insufficient role) → 403 Forbidden</li>
  *   <li>Everything else → 500 Internal Server Error</li>
  * </ul>
  */
@@ -112,6 +116,29 @@ public class GlobalExceptionHandler {
                 .status(HttpStatus.CONFLICT)
                 .body(ErrorResponse.of(409, "Conflict",
                         "This ticket was modified by another request. Please re-read and retry."));
+    }
+
+    /**
+     * Bad credentials — wrong email or password on login.
+     */
+    @ExceptionHandler(BadCredentialsException.class)
+    public ResponseEntity<ErrorResponse> handleBadCredentials(BadCredentialsException ex) {
+        return ResponseEntity
+                .status(HttpStatus.UNAUTHORIZED)
+                .body(ErrorResponse.of(401, "Unauthorized",
+                        "Invalid email or password."));
+    }
+
+    /**
+     * Access denied — authenticated but insufficient role.
+     * e.g., an AGENT trying to delete a ticket (requires ADMIN).
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(ErrorResponse.of(403, "Forbidden",
+                        "You do not have permission to perform this action."));
     }
 
     /**
