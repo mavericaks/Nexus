@@ -114,5 +114,28 @@ In B2B SaaS, tenant admins control who has access. A random Google user shouldn'
 
 The OAuth2 redirect flow needs temporary session state — Google sends the user to a consent page and back. Spring stores a "state" parameter in the session to validate the callback isn't forged (CSRF protection for OAuth). API requests still use JWT (no sessions).
 
-Unit IV :
--
+## Phase 4 — Spring AI + Groq + RAG
+
+### Key Lesson: Spring AI version compatibility matters
+
+Spring AI 2.0 requires Spring Boot 4.x. Spring AI 1.0.x works with Spring Boot 3.x. The `spring-ai-starter-model-google-genai-embedding` module only exists in 2.0+, so on Boot 3.4.1 we had to implement our own Gemini embedding client. **Always check BOM-to-Boot version matrix before adding Spring AI starters.**
+
+### Key Lesson: Port/adapter pattern for external AI services
+
+Wrapping every external AI call (LLM, embeddings) behind an interface is essential:
+- **Production**: `GeminiEmbeddingService` calls real API
+- **Tests**: fake adapter returns deterministic vectors
+- **CI never touches external APIs** → build stays green regardless of Groq/Gemini availability
+
+This is the same pattern as wrapping a database behind a repository interface, applied to AI services.
+
+### Key Lesson: LLM confidence scores must be derived, not self-reported
+
+Asking the model "how confident are you?" is unreliable — LLMs are notoriously miscalibrated. Instead, derive confidence from signals you can actually verify:
+- RAG retrieval similarity (did the KB have relevant content?)
+- Structured output parse success (did the model follow instructions?)
+- Category agreement (does classification match KB article categories?)
+
+### Key Lesson: Groq is OpenAI-compatible
+
+Groq implements the exact OpenAI `/v1/chat/completions` API. Spring AI's OpenAI starter works by just changing `base-url` to `https://api.groq.com/openai`. No custom HTTP client, no provider-specific code.

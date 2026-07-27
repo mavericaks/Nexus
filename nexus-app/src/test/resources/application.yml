@@ -7,6 +7,10 @@ nexus:
       secret: test-secret-key-must-be-at-least-32-bytes-long-for-hs256!!
       expiration-hours: 1
       issuer: nexus-test
+  ai:
+    confidence-threshold: 0.75
+    auto-resolve-enabled: false
+    max-retrieval-results: 3
 
 # Dummy OAuth2 config — prevents Spring from failing at startup
 # when it auto-configures the OAuth2 client.
@@ -19,3 +23,17 @@ spring:
           google:
             client-id: test-client-id
             client-secret: test-client-secret
+  # Spring AI test config — dummy keys so auto-configuration doesn't fail.
+  # Tests use mock/fake adapters, never real AI services.
+  ai:
+    openai:
+      api-key: test-groq-key-not-real
+      base-url: https://api.groq.com/openai
+    google:
+      genai:
+        embedding:
+          api-key: test-gemini-key-not-real
+    vectorstore:
+      pgvector:
+        initialize-schema: false
+

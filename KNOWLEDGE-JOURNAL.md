@@ -899,4 +899,91 @@ Request arrives
 
 ---
 
+## Phase 4 — Spring AI + Groq + RAG
+
+### Unit 1: Dependencies + AI Config + ADRs
+
+#### What was built
+- `spring-ai-starter-model-openai` — Groq uses OpenAI-compatible chat API
+- `spring-ai-starter-vector-store-pgvector` — vector store for RAG
+- `AiProperties.java` — typed config: confidence threshold, kill switch, max retrieval
+- ADR 0003: Embeddings provider (Gemini text-embedding-004)
+- ADR 0004: Tool calling approach (@Tool over separate MCP server)
+
+#### Why Groq uses the OpenAI starter
+Groq implements the exact same REST API as OpenAI (`/v1/chat/completions`), just at a different base URL. Spring AI's OpenAI starter works with any OpenAI-compatible provider — we just change `spring.ai.openai.base-url` to `https://api.groq.com/openai`. No custom HTTP client needed.
+
+#### Why NOT the Spring AI Gemini embedding starter
+The `spring-ai-starter-model-google-genai-embedding` module only exists in Spring AI 2.0+ (which requires Spring Boot 4.x). We're on Spring Boot 3.4.1 with Spring AI 1.0.9. Instead, we wrote a lightweight `GeminiEmbeddingService` using `RestClient` — cleaner port/adapter pattern anyway.
+
+#### The kill switch (architecture rationale §9)
+`nexus.ai.auto-resolve-enabled` is a runtime toggle that disables autonomous ticket resolution without a redeploy. When disabled, the AI still drafts a reply, but every ticket gets escalated for human review. This is the operational safety valve for "what if the AI starts making bad calls."
+
+### Unit 2: pgvector + Knowledge Base + Embedding Service
+
+#### What was built
+- `V4__knowledge_base_pgvector.sql` — migration with vector(768), HNSW index, RLS, seed data
+- `KnowledgeArticleEntity` + `KnowledgeArticleRepository` with native pgvector queries
+- `EmbeddingService` interface (port) + `GeminiEmbeddingService` (adapter)
+- `KnowledgeBaseSearchService` — RAG retrieval pipeline
+- `RetrievedArticle` value object
+
+#### Port/adapter pattern for embeddings (guardrails §9.4)
+```
+EmbeddingService (interface/port)
+    ├── GeminiEmbeddingService (production adapter — calls real API)
+    └── FakeEmbeddingService (test adapter — returns deterministic vectors)
+```
+CI tests NEVER call real Gemini. The port/adapter pattern makes this structurally impossible — test config wires the fake adapter, production config wires the real one.
+
+#### pgvector similarity search
+```sql
+SELECT *, 1 - (embedding <=> cast(:queryVector AS vector)) AS similarity
+FROM knowledge_articles
+WHERE embedding IS NOT NULL
+ORDER BY embedding <=> cast(:queryVector AS vector)
+LIMIT :k
+```
+The `<=>` operator is pgvector's cosine distance. `1 - distance = similarity` (1.0 = identical, 0.0 = orthogonal). The HNSW index makes this fast even at scale.
+
+### Units 3-4: Triage Agent + Confidence Score + API
+
+#### What was built
+- `TriageAgent` — core AI brain: RAG → LLM → structured JSON → triage result
+- `ConfidenceScoreCalculator` — derived confidence from measurable signals
+- `TriageService` — orchestrates ticket load → triage → update → state transition
+- `TriageController` — `POST /api/v1/tenants/{id}/tickets/{id}/triage`
+- `TriageResult` value object
+
+#### The triage pipeline
+```
+Ticket arrives (subject + description)
+    ↓
+KnowledgeBaseSearchService.search(query)
+    ↓  embed query → pgvector cosine search → top-k articles
+TriageAgent.triage(subject, description)
+    ↓  build prompt with KB context → call Groq (Llama 3.3 70B)
+    ↓  parse structured JSON output
+ConfidenceScoreCalculator.calculate(articles, parseSuccess, category)
+    ↓  RAG similarity (50%) + parse success (25%) + category match (25%)
+TriageService.triageTicket(ticketId)
+    ↓  update ticket fields → transition: NEW → CLASSIFIED → AI_DRAFTED
+    ↓  if confidence ≥ threshold → AUTO_RESOLVED
+    ↓  if confidence < threshold → ESCALATED
+```
+
+#### Why confidence is NOT raw LLM self-report (guardrails §9.3)
+Asking the model "how confident are you, 0-100" is unreliable — LLMs are miscalibrated and tend to sound confident regardless. Instead, we derive confidence from three measurable signals:
+
+| Signal | Weight | What it measures |
+|--------|--------|-----------------|
+| RAG similarity | 50% | Did the KB have relevant content? High similarity = KB covers this topic |
+| Parse success | 25% | Did the LLM output valid structured JSON? Failed parse = low confidence |
+| Category agreement | 25% | Does the AI's category match the KB article categories? |
+
+#### Test results
+69/69 tests pass. 8 new `ConfidenceScoreCalculatorTest` tests cover high/medium/low confidence scenarios — pure domain logic, no Spring context, millisecond execution.
+
+---
+
 *This document is updated every unit. Scroll to the bottom for the latest.*
