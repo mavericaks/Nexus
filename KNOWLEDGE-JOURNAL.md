@@ -899,91 +899,393 @@ Request arrives
 
 ---
 
-## Phase 4 — Spring AI + Groq + RAG
+## Phase 4 — Spring AI + Groq + MCP + RAG
+
+**Gate (from master-spec §5):** *"A real ticket gets triaged end-to-end by the agent"*
+
+Phase 4 is the AI brain of Nexus. It takes the secured REST API from Phase 3 and adds intelligence — when a support ticket comes in, the system classifies it, searches a knowledge base for relevant articles, drafts a customer reply, and decides whether to auto-resolve or escalate to a human.
 
 ### Unit 1: Dependencies + AI Config + ADRs
 
-#### What was built
-- `spring-ai-starter-model-openai` — Groq uses OpenAI-compatible chat API
-- `spring-ai-starter-vector-store-pgvector` — vector store for RAG
-- `AiProperties.java` — typed config: confidence threshold, kill switch, max retrieval
-- ADR 0003: Embeddings provider (Gemini text-embedding-004)
-- ADR 0004: Tool calling approach (@Tool over separate MCP server)
+#### The problem this unit solves
+Before writing any AI code, we need three things: the right libraries in `pom.xml`, externalized configuration for the AI services (API keys, model names, thresholds), and documented architectural decisions about *which* AI services to use.
 
-#### Why Groq uses the OpenAI starter
-Groq implements the exact same REST API as OpenAI (`/v1/chat/completions`), just at a different base URL. Spring AI's OpenAI starter works with any OpenAI-compatible provider — we just change `spring.ai.openai.base-url` to `https://api.groq.com/openai`. No custom HTTP client needed.
+#### Dependencies added to `pom.xml`
+
+```xml
+<!-- Groq LLM — uses the OpenAI starter because Groq is API-compatible -->
+<dependency>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-starter-model-openai</artifactId>
+</dependency>
+
+<!-- pgvector — stores and searches vector embeddings in Postgres -->
+<dependency>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-starter-vector-store-pgvector</artifactId>
+</dependency>
+```
+
+#### Why Groq uses the OpenAI starter (not a Groq-specific one)
+Groq doesn't have its own Spring AI starter. It doesn't need one — Groq implements the exact same REST API as OpenAI (`POST /v1/chat/completions` with the same request/response JSON schema). Spring AI's OpenAI starter is really an "OpenAI-compatible API" starter. We just point it at Groq's URL:
+
+```yaml
+spring.ai:
+  openai:
+    api-key: ${GROQ_API_KEY}
+    base-url: https://api.groq.com/openai  # ← only this line differs from OpenAI
+    chat:
+      options:
+        model: llama-3.3-70b-versatile     # Groq's flagship model
+        temperature: 0.1                    # Low for deterministic classification
+```
+
+This is a real interview talking point: "We use Groq for inference, but the code isn't Groq-specific. We could swap to OpenAI, Together AI, or any OpenAI-compatible provider by changing one YAML property."
 
 #### Why NOT the Spring AI Gemini embedding starter
-The `spring-ai-starter-model-google-genai-embedding` module only exists in Spring AI 2.0+ (which requires Spring Boot 4.x). We're on Spring Boot 3.4.1 with Spring AI 1.0.9. Instead, we wrote a lightweight `GeminiEmbeddingService` using `RestClient` — cleaner port/adapter pattern anyway.
+We tried adding `spring-ai-starter-model-google-genai-embedding` — the build failed because that module only exists in Spring AI 2.0+ (which requires Spring Boot 4.x). We're on Spring Boot 3.4.1 with Spring AI BOM 1.0.9. 
 
-#### The kill switch (architecture rationale §9)
-`nexus.ai.auto-resolve-enabled` is a runtime toggle that disables autonomous ticket resolution without a redeploy. When disabled, the AI still drafts a reply, but every ticket gets escalated for human review. This is the operational safety valve for "what if the AI starts making bad calls."
+**Lesson learned:** Always check the BOM-to-Boot version matrix. Spring AI's naming convention changed across versions, and new model integrations were added in 2.0. We solved this by writing our own `GeminiEmbeddingService` using `RestClient` — which actually gives us a cleaner port/adapter pattern (Unit 2 explains this).
+
+#### `AiProperties.java` — typed configuration
+```java
+@ConfigurationProperties(prefix = "nexus.ai")
+public record AiProperties(
+    double confidenceThreshold,  // 0.75 — below this → escalate
+    boolean autoResolveEnabled,  // kill switch (§9 of architecture rationale)
+    int maxRetrievalResults      // 5 — max KB articles for RAG context
+) {}
+```
+
+Why a record? It's immutable, IDE-autocompleted, and fails fast at startup if any property is missing. Compare to scattered `@Value("${nexus.ai.confidence-threshold}")` strings — one typo and you get a null at runtime instead of a startup failure.
+
+#### The kill switch
+`autoResolveEnabled` is the operational safety valve from the architecture rationale (§9): "What if the AI starts making bad calls in production?" Flip this to `false` (even via a runtime config reload) and the system falls back to "AI drafts, human always approves" — no redeploy needed.
+
+#### ADRs written
+- **ADR 0003** (`docs/adr/0003-embeddings-provider.md`): Why Gemini Embedding API over local sentence-transformers or OpenAI. Key factor: free (1500 RPM), high quality (768-dim), Spring-native support.
+- **ADR 0004** (`docs/adr/0004-tool-calling-approach.md`): Why Spring AI `@Tool` functions over a separate MCP server. Key factor: simpler to test, no second deployable, same tool-calling pattern, extractable later. The guardrails (§6) explicitly asked us to make this decision out loud.
+
+---
 
 ### Unit 2: pgvector + Knowledge Base + Embedding Service
 
-#### What was built
-- `V4__knowledge_base_pgvector.sql` — migration with vector(768), HNSW index, RLS, seed data
-- `KnowledgeArticleEntity` + `KnowledgeArticleRepository` with native pgvector queries
-- `EmbeddingService` interface (port) + `GeminiEmbeddingService` (adapter)
-- `KnowledgeBaseSearchService` — RAG retrieval pipeline
-- `RetrievedArticle` value object
+#### The problem this unit solves
+The AI needs context to give useful answers. If a customer asks "how do I reset my password?", the AI should find the relevant KB article and base its reply on that — not hallucinate an answer. This is called RAG (Retrieval-Augmented Generation).
 
-#### Port/adapter pattern for embeddings (guardrails §9.4)
-```
-EmbeddingService (interface/port)
-    ├── GeminiEmbeddingService (production adapter — calls real API)
-    └── FakeEmbeddingService (test adapter — returns deterministic vectors)
-```
-CI tests NEVER call real Gemini. The port/adapter pattern makes this structurally impossible — test config wires the fake adapter, production config wires the real one.
+RAG needs three things:
+1. A **knowledge base** (the articles)
+2. An **embedding service** (converts text → vectors for search)
+3. A **vector store** (finds similar articles by vector distance)
 
-#### pgvector similarity search
+#### `V4__knowledge_base_pgvector.sql` — the migration
+
 ```sql
-SELECT *, 1 - (embedding <=> cast(:queryVector AS vector)) AS similarity
-FROM knowledge_articles
-WHERE embedding IS NOT NULL
-ORDER BY embedding <=> cast(:queryVector AS vector)
-LIMIT :k
-```
-The `<=>` operator is pgvector's cosine distance. `1 - distance = similarity` (1.0 = identical, 0.0 = orthogonal). The HNSW index makes this fast even at scale.
+-- Enable the pgvector extension
+CREATE EXTENSION IF NOT EXISTS vector;
 
-### Units 3-4: Triage Agent + Confidence Score + API
-
-#### What was built
-- `TriageAgent` — core AI brain: RAG → LLM → structured JSON → triage result
-- `ConfidenceScoreCalculator` — derived confidence from measurable signals
-- `TriageService` — orchestrates ticket load → triage → update → state transition
-- `TriageController` — `POST /api/v1/tenants/{id}/tickets/{id}/triage`
-- `TriageResult` value object
-
-#### The triage pipeline
-```
-Ticket arrives (subject + description)
-    ↓
-KnowledgeBaseSearchService.search(query)
-    ↓  embed query → pgvector cosine search → top-k articles
-TriageAgent.triage(subject, description)
-    ↓  build prompt with KB context → call Groq (Llama 3.3 70B)
-    ↓  parse structured JSON output
-ConfidenceScoreCalculator.calculate(articles, parseSuccess, category)
-    ↓  RAG similarity (50%) + parse success (25%) + category match (25%)
-TriageService.triageTicket(ticketId)
-    ↓  update ticket fields → transition: NEW → CLASSIFIED → AI_DRAFTED
-    ↓  if confidence ≥ threshold → AUTO_RESOLVED
-    ↓  if confidence < threshold → ESCALATED
+-- Knowledge articles table with a vector column
+CREATE TABLE knowledge_articles (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id  UUID NOT NULL REFERENCES tenants(id),
+    title      VARCHAR(500) NOT NULL,
+    content    TEXT NOT NULL,
+    category   VARCHAR(50),
+    embedding  vector(768),  -- 768 dimensions for Gemini text-embedding-004
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 ```
 
-#### Why confidence is NOT raw LLM self-report (guardrails §9.3)
-Asking the model "how confident are you, 0-100" is unreliable — LLMs are miscalibrated and tend to sound confident regardless. Instead, we derive confidence from three measurable signals:
+**Why `vector(768)`?** Gemini's `text-embedding-004` model outputs 768-dimensional vectors. This number must match exactly — a 384-dim vector won't fit in a 768-dim column.
 
-| Signal | Weight | What it measures |
-|--------|--------|-----------------|
-| RAG similarity | 50% | Did the KB have relevant content? High similarity = KB covers this topic |
-| Parse success | 25% | Did the LLM output valid structured JSON? Failed parse = low confidence |
-| Category agreement | 25% | Does the AI's category match the KB article categories? |
+**HNSW index:**
+```sql
+CREATE INDEX idx_knowledge_articles_embedding
+    ON knowledge_articles
+    USING hnsw (embedding vector_cosine_ops);
+```
+HNSW (Hierarchical Navigable Small World) is the faster of pgvector's two index types (the other is IVFFlat). It trades slightly more memory for much better recall accuracy. For our scale (hundreds to thousands of articles), the memory cost is negligible.
+
+**RLS policy** — same pattern as tickets:
+```sql
+ALTER TABLE knowledge_articles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE knowledge_articles FORCE ROW LEVEL SECURITY;
+CREATE POLICY knowledge_articles_tenant_isolation
+    ON knowledge_articles FOR ALL TO nexus_app
+    USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+```
+Tenant A's KB articles are invisible to Tenant B. This is enforced at the database level — even if the application code has a bug, cross-tenant data can't leak.
+
+**Seed data:** 6 sample articles for Acme Corp covering password reset, billing, API integration, 2FA, analytics, and returns. This gives the AI something to search against immediately.
+
+#### The port/adapter pattern for embeddings
+
+This is the most important architectural pattern in Phase 4, and it comes directly from guardrails §9.4:
+
+```
+EmbeddingService (interface — the PORT)
+    │
+    ├── GeminiEmbeddingService (PRODUCTION adapter)
+    │       └── Calls real Gemini API via RestClient
+    │
+    └── [FakeEmbeddingService] (TEST adapter — not built yet, mocked via Mockito)
+            └── Returns deterministic vectors, never calls any API
+```
+
+**Why this matters:** The guardrails say "Live Groq/Gemini calls in CI will make green main untrustworthy." If CI depends on a real API, a rate limit or outage causes a test failure that has nothing to do with code correctness. The port/adapter pattern makes it *structurally impossible* for tests to hit a real API — the test config wires a fake, the production config wires the real one.
+
+#### `GeminiEmbeddingService` — the adapter
+
+```java
+@Service
+public class GeminiEmbeddingService implements EmbeddingService {
+    // Calls: POST https://generativelanguage.googleapis.com/v1beta/
+    //        models/text-embedding-004:embedContent?key=GEMINI_API_KEY
+    // Body:  { "model": "models/text-embedding-004",
+    //          "content": { "parts": [{ "text": "..." }] } }
+    // Returns: { "embedding": { "values": [0.1, 0.2, ...] } }
+}
+```
+
+We used `RestClient` (Spring 6's modern HTTP client) instead of the older `RestTemplate`. The Gemini API is simple enough that a 3-line request/response is all we need — no framework starter required.
+
+#### `KnowledgeArticleRepository` — native pgvector queries
+
+JPA can't express pgvector operators (`<=>` for cosine distance), so we use native queries:
+
+```java
+@Query(value = """
+    SELECT ka.*, 1 - (ka.embedding <=> cast(:embedding AS vector)) AS similarity
+    FROM knowledge_articles ka
+    WHERE ka.embedding IS NOT NULL
+    ORDER BY ka.embedding <=> cast(:embedding AS vector)
+    LIMIT :limit
+    """, nativeQuery = true)
+List<Object[]> findSimilar(@Param("embedding") String embedding, @Param("limit") int limit);
+```
+
+The `<=>` operator returns *cosine distance* (0.0 = identical, 2.0 = opposite). We convert to *similarity* with `1 - distance`, so 1.0 = perfect match, 0.0 = no relation. The results come back ordered by relevance.
+
+**Important:** The embedding column is NOT mapped in JPA (no `@Column` for it). pgvector's `vector` type has no built-in Hibernate mapping. Instead, we pass the vector as a string `"[0.1,0.2,0.3,...]"` and cast it with `cast(:embedding AS vector)`. This is handled by the `toPgVectorString()` utility method.
+
+---
+
+### Unit 3: Triage Agent (the AI brain)
+
+#### The problem this unit solves
+We have embeddings and a searchable knowledge base. Now we need the actual AI agent that takes a ticket, retrieves relevant KB articles, calls the LLM, and produces a classification + reply.
+
+#### `TriageAgent.java` — the pipeline
+
+The triage agent is a 5-step pipeline:
+
+```
+Step 1: RAG Retrieval
+    ticket subject + description → embed → pgvector search → top-k KB articles
+
+Step 2: Prompt Building
+    System prompt (instructions) + User prompt (ticket + KB context) → full prompt
+
+Step 3: LLM Call
+    prompt → Spring AI ChatClient → Groq (Llama 3.3 70B) → raw response
+
+Step 4: Parse Structured Output
+    raw text → strip markdown fences → parse JSON → extract fields
+
+Step 5: Derive Confidence
+    (not done here — passed to ConfidenceScoreCalculator)
+```
+
+#### The system prompt — why it's structured this way
+
+```
+You are an expert customer support triage agent for a SaaS product.
+You MUST respond with valid JSON in exactly this format:
+{
+  "category": "ACCOUNT|BILLING|TECHNICAL|GENERAL",
+  "priority": "LOW|MEDIUM|HIGH|CRITICAL",
+  "suggested_reply": "A helpful, professional reply to the customer",
+  "reasoning": "Your internal reasoning about why you chose this classification"
+}
+```
+
+**Why JSON output?** We need structured data (category, priority), not free-form text. By constraining the output format, we can programmatically extract the classification and feed it into the state machine. The `reasoning` field is for the audit log — explainable AI requires recording *why* the AI made each decision.
+
+**Why `temperature: 0.1`?** Low temperature makes the LLM more deterministic. For classification tasks, we want consistency — the same ticket should get the same category every time. High temperature (creativity) is for creative writing, not support triage.
+
+#### Handling LLM failures gracefully
+
+Two types of failure:
+1. **LLM returns invalid JSON** (happens ~5% of the time): The agent catches the parse error and returns a fallback result with low confidence → escalates to human.
+2. **LLM call fails entirely** (network error, rate limit): The agent catches the exception and returns a zero-confidence fallback → always escalates.
+
+```java
+} catch (Exception e) {
+    log.error("LLM call failed: {}", e.getMessage(), e);
+    return fallbackResult(subject, articles);
+}
+```
+
+This is production thinking — the AI feature is not allowed to crash the application. A mature system treats the AI call like any other external dependency: it might fail, and the system has a degradation path.
+
+#### Markdown code fence stripping
+
+LLMs frequently wrap JSON in ```json ... ``` markdown fences, even when told not to. The parser handles this:
+
+```java
+String json = llmResponse.strip();
+if (json.startsWith("```")) {
+    json = json.replaceAll("^```(?:json)?\\s*", "")
+               .replaceAll("```\\s*$", "").strip();
+}
+```
+
+This is a real-world LLM integration gotcha that most portfolio projects miss.
+
+---
+
+### Unit 4: Confidence Score + TriageResult
+
+#### The problem this unit solves
+The triage agent produces a classification, but how do we know if it's *good enough* to auto-resolve without human review? We need a confidence score — but NOT from asking the LLM "how confident are you?"
+
+#### Why LLM self-reported confidence is unreliable (guardrails §9.3)
+
+This is a known failure mode in LLM engineering: if you ask a model "rate your confidence 0-100", it will typically say 85-95 regardless of actual correctness. LLMs are trained to sound confident, not to be calibrated. This is mentioned in the architecture rationale as a deliberate design choice.
+
+#### `ConfidenceScoreCalculator` — three measurable signals
+
+Instead of asking the LLM, we derive confidence from things we can actually verify:
+
+| Signal | Weight | What it measures | Why it works |
+|--------|--------|-----------------|--------------|
+| **RAG similarity** | 50% | Average cosine similarity of retrieved KB articles | If the KB has a highly relevant article (similarity > 0.85), the AI has good source material → higher confidence |
+| **Parse success** | 25% | Did the LLM output valid JSON with all required fields? | If the model couldn't follow the structured output instructions, its classification is less trustworthy |
+| **Category agreement** | 25% | Does the AI's chosen category match the KB articles' categories? | If the AI says "BILLING" but all the retrieved articles are "ACCOUNT", something is off |
+
+```java
+double composite = (RAG_WEIGHT * ragScore) +
+                   (PARSE_WEIGHT * parseScore) +
+                   (CATEGORY_WEIGHT * categoryScore);
+```
+
+**Example calculation:**
+- RAG found 2 articles with similarity 0.92 and 0.85 → avg 0.885 × 0.50 = **0.44**
+- LLM output parsed successfully → 1.0 × 0.25 = **0.25**
+- Both articles are category BILLING, AI chose BILLING → 1.0 × 0.25 = **0.25**
+- **Total: 0.94** → above 0.75 threshold → auto-resolve
+
+**Example low confidence:**
+- No KB articles found → 0.0 × 0.50 = **0.00**
+- Parse succeeded → 1.0 × 0.25 = **0.25**
+- No articles to compare categories → 0.0 × 0.25 = **0.00**
+- **Total: 0.25** → below threshold → escalate to human
+
+#### `TriageResult` — the structured output
+
+```java
+public record TriageResult(
+    TicketCategory category,      // AI-classified category
+    TicketPriority priority,      // AI-classified priority
+    String suggestedReply,        // Customer-facing draft reply
+    String reasoning,             // Internal: why the AI decided this
+    double confidenceScore,       // 0.0–1.0, derived (not self-reported)
+    boolean autoResolvable        // confidence ≥ threshold AND kill switch on
+) {}
+```
+
+---
+
+### Unit 5: TriageService + TriageController (wiring into the ticket lifecycle)
+
+#### The problem this unit solves
+The triage agent can classify a ticket, but it's standalone logic. We need to wire it into the actual ticket lifecycle: load a ticket from the database, run triage, update the ticket's fields, and transition it through the state machine.
+
+#### `TriageService` — the orchestrator
+
+```
+1. Load ticket by ID (must be in NEW status)
+2. Call triageAgent.triage(subject, description)
+3. Update ticket fields:
+   - ticket.setCategory(result.category())
+   - ticket.setPriority(result.priority())
+   - ticket.setAiResponse(result.suggestedReply())
+   - ticket.setConfidenceScore(result.confidenceScore())
+4. Transition state machine:
+   - NEW → CLASSIFIED → AI_DRAFTED
+   - If autoResolvable: AI_DRAFTED → AUTO_RESOLVED
+   - If not: AI_DRAFTED → ESCALATED
+5. Save ticket
+```
+
+**Why does it check `ticket.getStatus() != TicketStatus.NEW`?** A ticket should only be triaged once automatically. If someone manually triggers re-triage on an already-classified ticket, we return the existing results instead of calling the LLM again (wastes quota).
+
+#### `TriageController` — the REST endpoint
+
+```
+POST /api/v1/tenants/{tenantId}/tickets/{ticketId}/triage
+Authorization: Bearer <JWT with ADMIN, OWNER, or AGENT role>
+
+Response:
+{
+  "category": "ACCOUNT",
+  "priority": "MEDIUM",
+  "suggestedReply": "To reset your password, click Forgot Password...",
+  "reasoning": "Customer is asking about password reset, direct KB match.",
+  "confidenceScore": 0.94,
+  "autoResolvable": true
+}
+```
+
+In production, triage would also be triggered automatically when a ticket is created (Phase 5 — async events). This endpoint exists for manual trigger and re-triage scenarios.
+
+---
+
+### Unit 6: Tests (the guardrails-mandated approach)
+
+#### The problem this unit solves
+Every AI test must pass without calling real external APIs. Guardrails §9.4: "Put a port/adapter around the LLM client; test orchestration logic against a fake in the main CI gate."
+
+#### `TriageAgentTest` — mocking the LLM
+
+```java
+@Mock private ChatModel chatModel;  // Spring AI's ChatModel interface
+
+private void stubLlmResponse(String responseText) {
+    AssistantMessage message = new AssistantMessage(responseText);
+    Generation generation = new Generation(message);
+    ChatResponse chatResponse = new ChatResponse(List.of(generation));
+    when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse);
+}
+```
+
+**Key lesson:** In Spring AI 1.0.x, `Generation` takes an `AssistantMessage`, not a raw `String`. We hit a compilation error here and had to fix it — the Spring AI API changed between versions.
+
+6 tests covering:
+- Valid JSON response → correct classification
+- JSON wrapped in markdown fences → still parses
+- Invalid JSON → graceful fallback with low confidence
+- LLM exception → zero-confidence fallback
+- No KB articles → lower confidence but still triages
+- High confidence → `autoResolvable` is true
+
+#### `ConfidenceScoreCalculatorTest` — pure domain logic
+8 tests covering high/medium/low confidence scenarios and edge cases (null category, empty articles, clamped range). These are pure Java — no Spring context, no mocks, run in milliseconds.
+
+#### `GeminiEmbeddingServiceTest` — input validation
+4 tests: null text, blank text, empty text → all throw `EmbeddingException`. Plus `dimensions()` returns 768.
+
+#### `KnowledgeBaseSearchServiceTest` — vector formatting
+3 tests: pgvector string format for normal vectors, empty vectors, single-element vectors.
+
+#### Gotcha: Spring AI `Generation` constructor API change
+When writing `TriageAgentTest`, the first version used `new Generation("response text")`. This compiled fine in earlier Spring AI versions but fails in 1.0.9 — the constructor expects `new Generation(new AssistantMessage("response text"))`. This is the kind of thing that bites you when following online tutorials written for different versions.
 
 #### Test results
-69/69 tests pass. 8 new `ConfidenceScoreCalculatorTest` tests cover high/medium/low confidence scenarios — pure domain logic, no Spring context, millisecond execution.
+**82/82 tests pass total** — 61 existing + 21 new AI tests. Zero live API calls in CI.
 
 ---
 
 *This document is updated every unit. Scroll to the bottom for the latest.*
+
