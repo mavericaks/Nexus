@@ -1,7 +1,9 @@
 package com.nexus;
 
+import com.nexus.ai.config.AiProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 /**
  * Entry point for the Nexus application.
@@ -11,6 +13,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * com.nexus.ticket, com.nexus.tenant, com.nexus.ai, com.nexus.notification, com.nexus.shared
  */
 @SpringBootApplication
+@EnableConfigurationProperties(AiProperties.class)
 public class NexusApplication {
 
     public static void main(String[] args) {

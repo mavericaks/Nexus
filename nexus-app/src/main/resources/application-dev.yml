@@ -62,3 +62,41 @@ nexus:
       url: jdbc:postgresql://localhost:15432/nexus
       username: nexus
       password: nexus_local
+  # ─── AI Triage configuration ──────────────────────────────────────
+  ai:
+    # Confidence threshold for auto-resolution.
+    # Below this → escalate to human. Above → auto-resolve.
+    confidence-threshold: 0.75
+    # Kill switch — set to false to disable AI auto-resolution at runtime.
+    # Falls back to "AI drafts, human always approves" mode.
+    auto-resolve-enabled: true
+    # Max KB articles to retrieve for RAG context.
+    max-retrieval-results: 5
+
+# ─── Spring AI — Groq (OpenAI-compatible endpoint) ──────────────────
+# Groq implements the OpenAI chat/completions API, so we use the
+# OpenAI starter pointed at Groq's base URL.
+spring.ai:
+  openai:
+    api-key: ${GROQ_API_KEY}
+    base-url: https://api.groq.com/openai
+    chat:
+      options:
+        model: llama-3.3-70b-versatile
+        temperature: 0.1
+        max-tokens: 2048
+  # ─── Gemini Embedding API ───────────────────────────────────────────
+  # Separate from Groq — used to convert text → vectors for RAG.
+  google:
+    genai:
+      embedding:
+        api-key: ${GEMINI_API_KEY}
+        options:
+          model: text-embedding-004
+  # ─── pgvector Vector Store ──────────────────────────────────────────
+  vectorstore:
+    pgvector:
+      dimensions: 768
+      index-type: hnsw
+      distance-type: cosine_distance
+      initialize-schema: true
