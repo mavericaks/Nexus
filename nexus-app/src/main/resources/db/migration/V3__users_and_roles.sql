@@ -70,14 +70,14 @@ ALTER TABLE user_roles FORCE ROW LEVEL SECURITY;
 
 -- ─── Seed demo users ────────────────────────────────────────────────
 -- BCrypt hash for 'password123' (cost 10):
--- $2a$10$dXJ3SW6G7P50lGmMQoeGUORFrZCYgCPQKb6DQ.YeGAjqkc2gCmKHG
+-- $2a$10$6AcoWOJFgI80EbEbELHnROh1X4oCjqtPz/Q.8Eg9772bgWOK17SbS
 
 -- Acme Corp owner
 INSERT INTO users (id, tenant_id, email, password_hash, name) VALUES
     ('cccc0000-0000-0000-0000-000000000001',
      'aaaa0000-0000-0000-0000-000000000001',
      'owner@acme.com',
-     '$2a$10$dXJ3SW6G7P50lGmMQoeGUORFrZCYgCPQKb6DQ.YeGAjqkc2gCmKHG',
+     '$2a$10$6AcoWOJFgI80EbEbELHnROh1X4oCjqtPz/Q.8Eg9772bgWOK17SbS',
      'Alice Acme');
 
 INSERT INTO user_roles (user_id, role) VALUES
@@ -88,7 +88,7 @@ INSERT INTO users (id, tenant_id, email, password_hash, name) VALUES
     ('cccc0000-0000-0000-0000-000000000002',
      'aaaa0000-0000-0000-0000-000000000001',
      'agent@acme.com',
-     '$2a$10$dXJ3SW6G7P50lGmMQoeGUORFrZCYgCPQKb6DQ.YeGAjqkc2gCmKHG',
+     '$2a$10$6AcoWOJFgI80EbEbELHnROh1X4oCjqtPz/Q.8Eg9772bgWOK17SbS',
      'Bob Agent');
 
 INSERT INTO user_roles (user_id, role) VALUES
@@ -99,7 +99,7 @@ INSERT INTO users (id, tenant_id, email, password_hash, name) VALUES
     ('cccc0000-0000-0000-0000-000000000003',
      'bbbb0000-0000-0000-0000-000000000002',
      'admin@beta.com',
-     '$2a$10$dXJ3SW6G7P50lGmMQoeGUORFrZCYgCPQKb6DQ.YeGAjqkc2gCmKHG',
+     '$2a$10$6AcoWOJFgI80EbEbELHnROh1X4oCjqtPz/Q.8Eg9772bgWOK17SbS',
      'Charlie Beta');
 
 INSERT INTO user_roles (user_id, role) VALUES

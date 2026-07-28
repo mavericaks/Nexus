@@ -26,7 +26,11 @@ public class TenantDataSourceConfig {
         return new BeanPostProcessor() {
             @Override
             public Object postProcessAfterInitialization(Object bean, String beanName) {
-                if (bean instanceof DataSource ds && !(bean instanceof TenantAwareDataSource)) {
+                // Only wrap the PRIMARY datasource — not authDataSource (used for
+                // login queries that bypass RLS) or Flyway's internal datasource.
+                if (bean instanceof DataSource ds
+                        && !(bean instanceof TenantAwareDataSource)
+                        && "dataSource".equals(beanName)) {
                     return new TenantAwareDataSource(ds);
                 }
                 return bean;

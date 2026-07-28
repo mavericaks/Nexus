@@ -19,14 +19,18 @@ import java.util.UUID;
  * via async event processing (Phase 5). This endpoint allows
  * manual/on-demand triage for testing and re-triage scenarios.
  */
+import com.nexus.ai.rag.KnowledgeBaseSearchService;
+
 @RestController
 @RequestMapping("/api/v1/tenants/{tenantId}/tickets")
 public class TriageController {
 
     private final TriageService triageService;
+    private final KnowledgeBaseSearchService knowledgeBaseSearchService;
 
-    public TriageController(TriageService triageService) {
+    public TriageController(TriageService triageService, KnowledgeBaseSearchService knowledgeBaseSearchService) {
         this.triageService = triageService;
+        this.knowledgeBaseSearchService = knowledgeBaseSearchService;
     }
 
     /**
@@ -54,6 +58,13 @@ public class TriageController {
                 result.confidenceScore(),
                 result.autoResolvable()
         ));
+    }
+
+    @PostMapping("/backfill-kb")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
+    public ResponseEntity<Integer> backfillKb(@PathVariable UUID tenantId) {
+        int count = knowledgeBaseSearchService.backfillEmbeddings();
+        return ResponseEntity.ok(count);
     }
 
     /**

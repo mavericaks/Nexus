@@ -59,7 +59,7 @@ nexus:
     # to bypass RLS. The app role (nexus_app) has RLS enforced, but
     # during login we don't know the tenant yet.
     auth-datasource:
-      url: jdbc:postgresql://localhost:15432/nexus
+      jdbc-url: jdbc:postgresql://localhost:15432/nexus
       username: nexus
       password: nexus_local
   # ─── AI Triage configuration ──────────────────────────────────────
@@ -93,10 +93,8 @@ spring.ai:
         api-key: ${GEMINI_API_KEY}
         options:
           model: text-embedding-004
-  # ─── pgvector Vector Store ──────────────────────────────────────────
-  vectorstore:
-    pgvector:
-      dimensions: 768
-      index-type: hnsw
-      distance-type: cosine_distance
-      initialize-schema: true
+# ─── Logging configuration ──────────────────────────────────────────
+logging:
+  level:
+    com.nexus: DEBUG
+    org.springframework.security: DEBUG

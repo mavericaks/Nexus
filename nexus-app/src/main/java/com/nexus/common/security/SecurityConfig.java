@@ -1,10 +1,7 @@
 package com.nexus.common.security;
 
-import com.nimbusds.jose.JWSAlgorithm;
-import com.nimbusds.jose.jwk.JWKSet;
-import com.nimbusds.jose.jwk.OctetSequenceKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
-import org.springframework.beans.factory.annotation.Value;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -16,16 +13,9 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import com.nexus.common.security.oauth2.OAuth2LoginSuccessHandler;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
-import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.web.SecurityFilterChain;
-
-import javax.crypto.SecretKey;
-import javax.crypto.spec.SecretKeySpec;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import com.nexus.common.security.oauth2.OAuth2LoginSuccessHandler;
 
 /**
  * Central security configuration for the Nexus API.
@@ -49,13 +39,13 @@ import javax.crypto.spec.SecretKeySpec;
 @EnableMethodSecurity
 public class SecurityConfig {
 
-    @Value("${nexus.security.jwt.secret}")
-    private String jwtSecret;
 
     private final OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
+    private final JwtDecoder jwtDecoder;
 
-    public SecurityConfig(OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler) {
+    public SecurityConfig(OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler, JwtDecoder jwtDecoder) {
         this.oAuth2LoginSuccessHandler = oAuth2LoginSuccessHandler;
+        this.jwtDecoder = jwtDecoder;
     }
 
     @Bean
@@ -104,24 +94,12 @@ public class SecurityConfig {
                 // decoder, and populates the SecurityContext
                 .oauth2ResourceServer(oauth2 ->
                         oauth2.jwt(jwt -> jwt
-                                .decoder(jwtDecoder())
+                                .decoder(jwtDecoder)
                                 .jwtAuthenticationConverter(jwtAuthenticationConverter())))
 
                 .build();
     }
 
-    /**
-     * JWT decoder — validates incoming tokens.
-     * Uses HMAC-SHA256 with our symmetric secret key.
-     */
-    @Bean
-    public JwtDecoder jwtDecoder() {
-        SecretKey key = new SecretKeySpec(
-                jwtSecret.getBytes(), "HmacSHA256");
-        return NimbusJwtDecoder.withSecretKey(key)
-                .macAlgorithm(MacAlgorithm.HS256)
-                .build();
-    }
 
     /**
      * Converts JWT claims into Spring Security authorities.
@@ -143,20 +121,6 @@ public class SecurityConfig {
         return converter;
     }
 
-    /**
-     * JWT encoder — creates new tokens (used by AuthController).
-     * Same symmetric key as the decoder.
-     */
-    @Bean
-    public JwtEncoder jwtEncoder() {
-        SecretKey key = new SecretKeySpec(
-                jwtSecret.getBytes(), "HmacSHA256");
-        OctetSequenceKey jwk = new OctetSequenceKey.Builder(key)
-                .keyID("nexus")
-                .algorithm(JWSAlgorithm.HS256)
-                .build();
-        return new NimbusJwtEncoder(new ImmutableJWKSet<>(new JWKSet(jwk)));
-    }
 
     /**
      * BCrypt password encoder — industry standard for hashing passwords.

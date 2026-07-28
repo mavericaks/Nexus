@@ -58,3 +58,11 @@ COMMENT ON COLUMN tickets.category IS 'Matches TicketCategory enum: BILLING, TEC
 COMMENT ON COLUMN tickets.confidence_score IS 'AI triage confidence (0.0–1.0). Derived from retrieval similarity + structured output validation, NOT self-reported.';
 COMMENT ON COLUMN tickets.version IS 'Optimistic locking — prevents silent overwrites when two agents edit the same ticket.';
 COMMENT ON COLUMN tickets.assignee_id IS 'Human agent assigned after escalation. FK to users table added in Phase 3 (Security).';
+
+-- ─── Seed Tenants ───────────────────────────────────────────────────
+-- These are referenced by V3 (users) and V4 (KB articles) via FK.
+-- Deterministic UUIDs for reproducible local development.
+
+INSERT INTO tenants (id, name, slug, plan_tier) VALUES
+    ('aaaa0000-0000-0000-0000-000000000001', 'Acme Corp', 'acme-corp', 'PROFESSIONAL'),
+    ('bbbb0000-0000-0000-0000-000000000002', 'Beta Inc',  'beta-inc',  'FREE');

@@ -33,7 +33,4 @@ spring:
       genai:
         embedding:
           api-key: test-gemini-key-not-real
-    vectorstore:
-      pgvector:
-        initialize-schema: false
 

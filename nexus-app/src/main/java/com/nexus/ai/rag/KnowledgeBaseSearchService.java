@@ -83,6 +83,7 @@ public class KnowledgeBaseSearchService {
      * @param articleId the article ID
      * @param text      the text to embed (typically title + content)
      */
+    @org.springframework.transaction.annotation.Transactional
     public void embedArticle(UUID articleId, String text) {
         List<Float> embedding = embeddingService.embed(text);
         String vectorString = toPgVectorString(embedding);
@@ -94,6 +95,7 @@ public class KnowledgeBaseSearchService {
      * Backfills embeddings for any articles that don't have one yet.
      * Called at startup or via a scheduled job.
      */
+    @org.springframework.transaction.annotation.Transactional
     public int backfillEmbeddings() {
         List<Object[]> articlesWithout = articleRepository.findArticlesWithoutEmbedding();
         log.info("Found {} articles without embeddings, backfilling...", articlesWithout.size());

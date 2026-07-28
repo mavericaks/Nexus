@@ -28,7 +28,7 @@ public class GeminiEmbeddingService implements EmbeddingService {
     private static final Logger log = LoggerFactory.getLogger(GeminiEmbeddingService.class);
 
     private static final String GEMINI_EMBED_URL =
-            "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent";
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:embedContent";
 
     private static final int DIMENSIONS = 768;
 
@@ -53,10 +53,11 @@ public class GeminiEmbeddingService implements EmbeddingService {
         try {
             // Gemini embedding API request format
             var requestBody = Map.of(
-                    "model", "models/text-embedding-004",
+                    "model", "models/gemini-embedding-2",
                     "content", Map.of(
                             "parts", List.of(Map.of("text", text))
-                    )
+                    ),
+                    "outputDimensionality", DIMENSIONS
             );
 
             @SuppressWarnings("unchecked")
