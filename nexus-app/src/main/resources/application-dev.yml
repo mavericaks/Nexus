@@ -46,22 +46,6 @@ spring:
             client-secret: ${GOOGLE_CLIENT_SECRET}
             scope: openid, email, profile
 
-  # ─── Kafka configuration (Phase 5) ────────────────────────────────
-  # Spring Boot auto-configures KafkaTemplate and consumer factory
-  # from these settings. Port 19092 = Docker Compose host port.
-  kafka:
-    bootstrap-servers: localhost:19092
-    consumer:
-      group-id: nexus-app-group
-      auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-      properties:
-        spring.json.trusted.packages: "*"
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-
 # ─── Security — JWT configuration ──────────────────────────────────
 # HMAC-SHA256 secret must be at least 256 bits (32 bytes).
 # This is a DEV-ONLY key — production would use env variable / Vault.

@@ -5,10 +5,8 @@ import com.nexus.ticket.domain.TicketStateMachine;
 import com.nexus.ticket.domain.TicketStatus;
 import com.nexus.ticket.infrastructure.persistence.TicketEntity;
 import com.nexus.ticket.infrastructure.persistence.TicketRepository;
-import com.nexus.ticket.domain.event.TicketStatusChangedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,13 +32,10 @@ public class TriageService {
 
     private final TicketRepository ticketRepository;
     private final TriageAgent triageAgent;
-    private final ApplicationEventPublisher eventPublisher;
 
-    public TriageService(TicketRepository ticketRepository, TriageAgent triageAgent,
-                         ApplicationEventPublisher eventPublisher) {
+    public TriageService(TicketRepository ticketRepository, TriageAgent triageAgent) {
         this.ticketRepository = ticketRepository;
         this.triageAgent = triageAgent;
-        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -79,38 +74,26 @@ public class TriageService {
 
         // Transition state: NEW → CLASSIFIED
         if (TicketStateMachine.canTransition(ticket.getStatus(), TicketStatus.CLASSIFIED)) {
-            TicketStatus oldStatus = ticket.getStatus();
             ticket.setStatus(TicketStatus.CLASSIFIED);
             log.info("Ticket {} transitioned to CLASSIFIED", ticketId);
-            eventPublisher.publishEvent(new TicketStatusChangedEvent(
-                    ticket.getTenant().getId(), ticketId, oldStatus, TicketStatus.CLASSIFIED));
         }
 
         // Transition state: CLASSIFIED → AI_DRAFTED
         if (TicketStateMachine.canTransition(ticket.getStatus(), TicketStatus.AI_DRAFTED)) {
-            TicketStatus oldStatus = ticket.getStatus();
             ticket.setStatus(TicketStatus.AI_DRAFTED);
             log.info("Ticket {} transitioned to AI_DRAFTED", ticketId);
-            eventPublisher.publishEvent(new TicketStatusChangedEvent(
-                    ticket.getTenant().getId(), ticketId, oldStatus, TicketStatus.AI_DRAFTED));
         }
 
         // If auto-resolvable, transition: AI_DRAFTED → AUTO_RESOLVED
         if (result.autoResolvable() &&
             TicketStateMachine.canTransition(ticket.getStatus(), TicketStatus.AUTO_RESOLVED)) {
-            TicketStatus oldStatus = ticket.getStatus();
             ticket.setStatus(TicketStatus.AUTO_RESOLVED);
             log.info("Ticket {} AUTO-RESOLVED (confidence: {:.2f})", ticketId, result.confidenceScore());
-            eventPublisher.publishEvent(new TicketStatusChangedEvent(
-                    ticket.getTenant().getId(), ticketId, oldStatus, TicketStatus.AUTO_RESOLVED));
         } else if (!result.autoResolvable()) {
             // Escalate: AI_DRAFTED → ESCALATED
             if (TicketStateMachine.canTransition(ticket.getStatus(), TicketStatus.ESCALATED)) {
-                TicketStatus oldStatus = ticket.getStatus();
                 ticket.setStatus(TicketStatus.ESCALATED);
                 log.info("Ticket {} ESCALATED (confidence: {:.2f} < threshold)", ticketId, result.confidenceScore());
-                eventPublisher.publishEvent(new TicketStatusChangedEvent(
-                        ticket.getTenant().getId(), ticketId, oldStatus, TicketStatus.ESCALATED));
             }
         }
 

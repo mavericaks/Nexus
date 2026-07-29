@@ -19,15 +19,11 @@ import com.nexus.ticket.infrastructure.persistence.TicketRepository;
 import com.nexus.ticket.infrastructure.persistence.TicketSpecifications;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import com.nexus.ticket.domain.event.TicketCreatedEvent;
-import com.nexus.ticket.domain.event.TicketStatusChangedEvent;
 
 import java.util.UUID;
 
@@ -53,12 +49,10 @@ public class TicketService {
 
     private final TicketRepository ticketRepository;
     private final TenantRepository tenantRepository;
-    private final ApplicationEventPublisher eventPublisher;
 
-    public TicketService(TicketRepository ticketRepository, TenantRepository tenantRepository, ApplicationEventPublisher eventPublisher) {
+    public TicketService(TicketRepository ticketRepository, TenantRepository tenantRepository) {
         this.ticketRepository = ticketRepository;
         this.tenantRepository = tenantRepository;
-        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -85,8 +79,6 @@ public class TicketService {
 
         TicketEntity saved = ticketRepository.save(ticket);
         log.info("Ticket created: id={}, tenant={}", saved.getId(), tenantId);
-
-        eventPublisher.publishEvent(new TicketCreatedEvent(tenantId, saved.getId(), saved.getSubject()));
 
         return TicketMapper.toResponse(saved);
     }
@@ -189,13 +181,6 @@ public class TicketService {
         ticket.setStatus(targetStatus);
         TicketEntity saved = ticketRepository.save(ticket);
         log.info("Ticket transitioned: id={}, {} → {}", saved.getId(), currentStatus, targetStatus);
-
-        eventPublisher.publishEvent(new TicketStatusChangedEvent(
-                ticket.getTenant().getId(),
-                saved.getId(),
-                currentStatus,
-                targetStatus
-        ));
 
         return TicketMapper.toResponse(saved);
     }
