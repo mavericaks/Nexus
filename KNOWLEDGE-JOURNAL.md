@@ -1290,3 +1290,68 @@ When writing `TriageAgentTest`, the first version used `new Generation("response
 *This document is updated every unit. Scroll to the bottom for the latest.*
 
 
+
+## Phase 5: Asynchronous Triage with Kafka
+
+### Unit 1: Docker Compose Kafka setup & Spring Kafka Dependencies
+
+#### The problem this unit solves
+Before we can decouple our monolithic ticket flow, we need a message broker. Kafka provides durable, replayable event streaming.
+
+#### What we did
+- **Dependencies**: Added spring-kafka and 	testcontainers-kafka to pom.xml.
+- **Configuration**: Updated application-dev.yml to point to localhost:19092 with JsonSerializer and JsonDeserializer so we can pass Java records directly to Kafka.
+- **Infrastructure**: Started the local Apache Kafka (KRaft mode) container via docker compose up -d kafka.
+
+
+### Unit 2: Spring Domain Events & ApplicationEventPublisher
+
+#### The problem this unit solves
+Instead of tightly coupling our TicketService directly to Kafka or the AI Triage code, we want to emit internal domain events. This allows any part of the system (or even multiple parts) to react to ticket changes without modifying the core Ticket business logic.
+
+#### What we did
+- Created TicketCreatedEvent and TicketStatusChangedEvent Java records to represent domain facts.
+- Injected Spring's ApplicationEventPublisher into TicketService.
+- Added eventPublisher.publishEvent() calls inside createTicket() and 	ransitionTicket() methods.
+
+This follows the **Observer Pattern** using Spring's built-in event bus. It sets the stage for Unit 3, where we will bridge these internal events out to the external Kafka topic.
+
+### Unit 3: Kafka Producer Configuration and Event Publishing
+
+#### The problem this unit solves
+Our `TicketService` publishes Spring `ApplicationEvent`s, but those are in-process only — they vanish when the JVM restarts. We need to bridge them to Kafka so that external services (like the Notification Service) can consume them reliably, with at-least-once delivery and replay capability.
+
+#### Architecture: Hexagonal port/adapter pattern
+
+```
+TicketService (domain)
+    │  publishes TicketCreatedEvent via ApplicationEventPublisher (port)
+    ▼
+TicketEventKafkaPublisher (infrastructure adapter)
+    │  @EventListener catches the Spring event
+    │  KafkaTemplate.send() serialises it as JSON to a Kafka topic
+    ▼
+Kafka broker (nexus.tickets.created / nexus.tickets.status-changed)
+    │
+    ▼
+Consumers (Unit 5: async triage, Unit 7: notification service)
+```
+
+This is the **Hexagonal Architecture** in action: the domain layer never imports Kafka — it only knows about `ApplicationEventPublisher` (the port). The infrastructure adapter (`TicketEventKafkaPublisher`) handles the Kafka-specific wiring. If we ever swapped Kafka for RabbitMQ, only this adapter changes.
+
+#### What we created
+
+| File | Purpose |
+|------|---------|
+| `TicketKafkaTopics.java` | Constants for topic names (`nexus.tickets.created`, `nexus.tickets.status-changed`) — avoids string typos which create silent black holes |
+| `TicketEventKafkaPublisher.java` | `@EventListener` that catches Spring events and forwards them to Kafka via `KafkaTemplate` |
+| `KafkaConfig.java` | `NewTopic` bean declarations (3 partitions, 1 replica) — Spring's `KafkaAdmin` auto-creates these on startup |
+
+#### Key design decision: Kafka message key = ticketId
+We use `ticketId.toString()` as the Kafka message key. This ensures all events for the same ticket land on the **same partition**, which guarantees ordering. Without this, a consumer could receive `STATUS_CHANGED(ESCALATED)` before `CREATED` for the same ticket — a race condition that would break any downstream processing.
+
+#### Also updated: TriageService
+`TriageService` transitions tickets through multiple states (NEW → CLASSIFIED → AI_DRAFTED → AUTO_RESOLVED/ESCALATED) but previously didn't publish any events. We injected `ApplicationEventPublisher` and added `TicketStatusChangedEvent` publishing at every transition point. Without this, the notification service would never know a ticket was escalated.
+
+#### Gotcha: PowerShell BOM
+PowerShell's `-Encoding UTF8` writes a UTF-8 BOM (`\ufeff`) at the start of files. Java's compiler rejects this as an illegal character. Fixed by stripping the BOM bytes from all three new files.
