@@ -1290,3 +1290,194 @@ When writing `TriageAgentTest`, the first version used `new Generation("response
 *This document is updated every unit. Scroll to the bottom for the latest.*
 
 
+
+## Phase 5: Asynchronous Triage with Kafka
+
+### Unit 1: Docker Compose Kafka setup & Spring Kafka Dependencies
+
+#### The problem this unit solves
+Before we can decouple our monolithic ticket flow, we need a message broker. Kafka provides durable, replayable event streaming.
+
+#### What we did
+- **Dependencies**: Added spring-kafka and 	testcontainers-kafka to pom.xml.
+- **Configuration**: Updated application-dev.yml to point to localhost:19092 with JsonSerializer and JsonDeserializer so we can pass Java records directly to Kafka.
+- **Infrastructure**: Started the local Apache Kafka (KRaft mode) container via docker compose up -d kafka.
+
+
+### Unit 2: Spring Domain Events & ApplicationEventPublisher
+
+#### The problem this unit solves
+Instead of tightly coupling our TicketService directly to Kafka or the AI Triage code, we want to emit internal domain events. This allows any part of the system (or even multiple parts) to react to ticket changes without modifying the core Ticket business logic.
+
+#### What we did
+- Created TicketCreatedEvent and TicketStatusChangedEvent Java records to represent domain facts.
+- Injected Spring's ApplicationEventPublisher into TicketService.
+- Added eventPublisher.publishEvent() calls inside createTicket() and 	ransitionTicket() methods.
+
+This follows the **Observer Pattern** using Spring's built-in event bus. It sets the stage for Unit 3, where we will bridge these internal events out to the external Kafka topic.
+
+### Unit 3: Kafka Producer Configuration and Event Publishing
+
+#### The problem this unit solves
+Our `TicketService` publishes Spring `ApplicationEvent`s, but those are in-process only — they vanish when the JVM restarts. We need to bridge them to Kafka so that external services (like the Notification Service) can consume them reliably, with at-least-once delivery and replay capability.
+
+#### Architecture: Hexagonal port/adapter pattern
+
+```
+TicketService (domain)
+    │  publishes TicketCreatedEvent via ApplicationEventPublisher (port)
+    ▼
+TicketEventKafkaPublisher (infrastructure adapter)
+    │  @EventListener catches the Spring event
+    │  KafkaTemplate.send() serialises it as JSON to a Kafka topic
+    ▼
+Kafka broker (nexus.tickets.created / nexus.tickets.status-changed)
+    │
+    ▼
+Consumers (Unit 5: async triage, Unit 7: notification service)
+```
+
+This is the **Hexagonal Architecture** in action: the domain layer never imports Kafka — it only knows about `ApplicationEventPublisher` (the port). The infrastructure adapter (`TicketEventKafkaPublisher`) handles the Kafka-specific wiring. If we ever swapped Kafka for RabbitMQ, only this adapter changes.
+
+#### What we created
+
+| File | Purpose |
+|------|---------|
+| `TicketKafkaTopics.java` | Constants for topic names (`nexus.tickets.created`, `nexus.tickets.status-changed`) — avoids string typos which create silent black holes |
+| `TicketEventKafkaPublisher.java` | `@EventListener` that catches Spring events and forwards them to Kafka via `KafkaTemplate` |
+| `KafkaConfig.java` | `NewTopic` bean declarations (3 partitions, 1 replica) — Spring's `KafkaAdmin` auto-creates these on startup |
+
+#### Key design decision: Kafka message key = ticketId
+We use `ticketId.toString()` as the Kafka message key. This ensures all events for the same ticket land on the **same partition**, which guarantees ordering. Without this, a consumer could receive `STATUS_CHANGED(ESCALATED)` before `CREATED` for the same ticket — a race condition that would break any downstream processing.
+
+#### Also updated: TriageService
+`TriageService` transitions tickets through multiple states (NEW → CLASSIFIED → AI_DRAFTED → AUTO_RESOLVED/ESCALATED) but previously didn't publish any events. We injected `ApplicationEventPublisher` and added `TicketStatusChangedEvent` publishing at every transition point. Without this, the notification service would never know a ticket was escalated.
+
+#### Gotcha: PowerShell BOM
+PowerShell's `-Encoding UTF8` writes a UTF-8 BOM (`\ufeff`) at the start of files. Java's compiler rejects this as an illegal character. Fixed by stripping the BOM bytes from all three new files.
+
+### Unit 4: Async Configuration & Security Context Propagation
+
+#### The problem this unit solves
+By default, if we use Spring's `@Async` to run background tasks, Spring executes them in a new thread. However, the `SecurityContext` (which holds our JWT and tenant ID) is bound to the *original* HTTP request thread. If the background thread tries to query the database, our `TenantAwareDataSource` won't find a tenant ID, and PostgreSQL Row-Level Security (RLS) will block the query.
+
+#### What we did
+Created `AsyncConfig.java` which:
+1. Enables `@Async` support globally.
+2. Configures a custom `ThreadPoolTaskExecutor` (named `NexusAsync-`).
+3. **Crucially:** Wraps the executor in Spring Security's `DelegatingSecurityContextAsyncTaskExecutor`.
+
+This magical wrapper automatically copies the `SecurityContext` from the original thread to the new background thread right before execution, and cleans it up afterwards. This ensures RLS continues to work seamlessly in background tasks.
+
+### Unit 5: Async Ticket Triage Execution (Kafka Consumer)
+
+#### The problem this unit solves
+Before Phase 5, triage was synchronous: the user called `POST /triage` and waited for the LLM to respond (which can take 5-15 seconds). Now, ticket creation automatically triggers triage in the background — the API returns instantly, and the consumer picks up the event from Kafka to run triage asynchronously.
+
+#### What we created
+
+| File | Purpose |
+|------|---------|
+| `TriageEventConsumer.java` | `@KafkaListener` that consumes `TicketCreatedEvent` from the `nexus.tickets.created` topic and calls `TriageService.triageTicket()` |
+
+#### Key design decisions
+
+1. **Tenant context on Kafka threads:** Kafka consumer threads have no HTTP request, no JWT, and no `TenantContextFilter`. We manually call `TenantContext.setTenantId(event.tenantId())` before any DB access and `TenantContext.clear()` in the `finally` block. Without this, RLS would block all queries.
+
+2. **Idempotency via status check:** `TriageService.triageTicket()` already checks `if (ticket.getStatus() != NEW) → skip`. So if Kafka delivers a duplicate event (at-least-once guarantee), the second attempt harmlessly skips triage.
+
+3. **Error handling — catch, don't rethrow:** We catch all exceptions and log them rather than rethrowing. If we rethrew, Kafka would retry the same message indefinitely on permanent failures (e.g., ticket deleted, LLM down). In production, we'd push failed events to a Dead Letter Topic (DLT).
+
+4. **Separate consumer group:** We use `nexus-triage-group` (not the generic `nexus-app-group` from `application-dev.yml`). This lets us scale triage consumers independently from other consumers.
+
+#### Data flow (end-to-end)
+```
+User → POST /tickets → TicketService.createTicket()
+    → saves to DB
+    → publishes TicketCreatedEvent (Spring event bus)
+    → TicketEventKafkaPublisher catches it → sends to Kafka topic
+    → TriageEventConsumer picks it up from Kafka
+    → sets TenantContext from event payload
+    → calls TriageService.triageTicket()
+    → LLM classifies + drafts reply
+    → ticket updated: NEW → CLASSIFIED → AI_DRAFTED → AUTO_RESOLVED/ESCALATED
+```
+
+### Unit 6: Scheduled Jobs (SLA Sweep & KB Backfill)
+
+#### The problem this unit solves
+Two background processes that don't fit the event-driven model (they're time-driven, not event-driven):
+1. **SLA Sweep:** If a ticket has been sitting in `NEW` or `CLASSIFIED` for more than 4 hours, it means the async triage either failed or got stuck. The sweep auto-escalates these tickets to `ESCALATED` so a human agent can pick them up.
+2. **KB Backfill:** New knowledge base articles might not have vector embeddings yet. A nightly job generates them so RAG search stays accurate.
+
+#### What we created
+
+| File | Purpose |
+|------|---------|
+| `ScheduledJobs.java` | `@EnableScheduling` + two `@Scheduled` methods: `slaSweep()` (every 15 min) and `kbBackfill()` (daily at 2 AM) |
+
+Also added to `TicketRepository.java`:
+- `findByStatusInAndCreatedAtBefore()` — JPQL query to find tickets in `NEW`/`CLASSIFIED` created before the SLA cutoff time.
+
+#### Key design decisions
+
+1. **Per-tenant iteration:** Scheduled threads have no HTTP request, no JWT. We iterate `tenantRepository.findAll()` and manually set `TenantContext` for each tenant. This way RLS is enforced correctly per tenant, and we don't need a privileged datasource.
+
+2. **Configurable via application.yml:** Both schedules are externalized:
+   - `nexus.scheduling.sla-sweep-ms` (default: 900000 = 15 min)
+   - `nexus.scheduling.kb-backfill-cron` (default: `0 0 2 * * *` = 2 AM daily)
+
+3. **Fault isolation per tenant:** If one tenant's sweep fails (e.g., DB timeout), we catch the exception and continue to the next tenant rather than aborting the entire sweep.
+
+4. **Event publishing on escalation:** When the SLA sweep escalates a ticket, it publishes a `TicketStatusChangedEvent` — this flows through the Kafka publisher so the notification service (Unit 7) can alert humans about SLA breaches.
+
+### Unit 7: Notification Microservice (Idempotent Consumer)
+
+#### The problem this unit solves
+When a ticket is escalated, auto-resolved, or picked up by an agent, *someone* needs to be notified — the support team, the customer, or both. This logic doesn't belong in the core API because:
+1. Sending emails/Slack messages is a **side effect** — it shouldn't block the API response.
+2. Notification logic changes independently from ticket logic (e.g., adding PagerDuty).
+3. If the notification service is down, ticket creation should still work.
+
+#### Architecture: First microservice extraction
+```
+nexus-app (port 8080)                    nexus-notifications (port 8081)
+┌──────────────────────┐                 ┌──────────────────────────┐
+│ TicketService        │                 │ NotificationEventConsumer│
+│   → publishes event  │                 │   ← @KafkaListener       │
+│   → KafkaTemplate    │ ──── Kafka ──── │   → InMemoryDedupStore   │
+│                      │  topic:         │   → NotificationDispatcher│
+│                      │  nexus.tickets. │     → Email (simulated)  │
+│                      │  status-changed │     → Slack (simulated)  │
+└──────────────────────┘                 └──────────────────────────┘
+```
+
+Key architectural principle: **nexus-notifications has ZERO compile-time dependency on nexus-app.** The only shared contract is the JSON schema on the Kafka topic. This means:
+- Independent deployment & release cycles
+- Independent scaling (notifications can have more consumers than the core API)
+- If nexus-notifications crashes, nexus-app continues working — Kafka buffers the events
+
+#### What we created
+
+| File | Purpose |
+|------|---------|
+| `nexus-notifications/pom.xml` | New Maven sub-module with spring-boot-starter-web + spring-kafka |
+| `NotificationApplication.java` | Spring Boot entry point (port 8081) |
+| `TicketStatusChangedMessage.java` | Independent event DTO — mirrors the nexus-app event schema |
+| `NotificationEventConsumer.java` | `@KafkaListener` on `nexus.tickets.status-changed` with dedup |
+| `NotificationDispatcher.java` | Routes events to appropriate channels (email/Slack simulators) |
+| `InMemoryDedupStore.java` | Idempotent Consumer Pattern using `ConcurrentHashMap` |
+| `application.yml` | Kafka config pointing to localhost:19092, port 8081 |
+
+Also updated:
+- `pom.xml` (parent): Added `<module>nexus-notifications</module>`
+
+#### Key design decisions
+
+1. **Idempotent Consumer Pattern:** The dedup key is `{ticketId}:{newStatus}`. If Kafka redelivers the same event (at-least-once guarantee), `InMemoryDedupStore.tryProcess()` returns `false` and we skip the duplicate. In production, this would use Redis `SETNX` with a TTL.
+
+2. **Independent event DTO:** `TicketStatusChangedMessage` uses `String` for status (not the enum from nexus-app). This avoids a compile-time dependency and is resilient to new statuses being added.
+
+3. **Simulated notifications:** `NotificationDispatcher` logs structured "SIMULATED EMAIL" and "SIMULATED SLACK" blocks at INFO level. This makes it easy to verify the pipeline works end-to-end without external integrations.
+
+4. **Separate consumer group:** `nexus-notifications-group` — completely independent from `nexus-app-group` and `nexus-triage-group`. Kafka delivers every event to every consumer group, so all three get their own copy.

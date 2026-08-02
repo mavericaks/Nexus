@@ -78,6 +78,9 @@ class TicketSecurityTest {
     @MockitoBean(name = "authDataSource")
     private javax.sql.DataSource authDataSource;
 
+    @MockitoBean
+    private org.springframework.security.oauth2.jwt.JwtDecoder jwtDecoder;
+
     // ─── Test data ──────────────────────────────────────────────────
 
     private static final UUID TENANT_ID = UUID.fromString("aaaa0000-0000-0000-0000-000000000001");

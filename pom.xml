@@ -28,6 +28,7 @@
     <!-- Sub-modules that Maven will build, in order -->
     <modules>
         <module>nexus-app</module>
+        <module>nexus-notifications</module>
     </modules>
 
     <!--

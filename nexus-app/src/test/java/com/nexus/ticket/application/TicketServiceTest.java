@@ -45,6 +45,9 @@ class TicketServiceTest {
     @Mock
     private TenantRepository tenantRepository;
 
+    @Mock
+    private org.springframework.context.ApplicationEventPublisher eventPublisher;
+
     @InjectMocks
     private TicketService ticketService;
 
