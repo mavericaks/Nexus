@@ -1368,3 +1368,37 @@ Created `AsyncConfig.java` which:
 3. **Crucially:** Wraps the executor in Spring Security's `DelegatingSecurityContextAsyncTaskExecutor`.
 
 This magical wrapper automatically copies the `SecurityContext` from the original thread to the new background thread right before execution, and cleans it up afterwards. This ensures RLS continues to work seamlessly in background tasks.
+
+### Unit 5: Async Ticket Triage Execution (Kafka Consumer)
+
+#### The problem this unit solves
+Before Phase 5, triage was synchronous: the user called `POST /triage` and waited for the LLM to respond (which can take 5-15 seconds). Now, ticket creation automatically triggers triage in the background — the API returns instantly, and the consumer picks up the event from Kafka to run triage asynchronously.
+
+#### What we created
+
+| File | Purpose |
+|------|---------|
+| `TriageEventConsumer.java` | `@KafkaListener` that consumes `TicketCreatedEvent` from the `nexus.tickets.created` topic and calls `TriageService.triageTicket()` |
+
+#### Key design decisions
+
+1. **Tenant context on Kafka threads:** Kafka consumer threads have no HTTP request, no JWT, and no `TenantContextFilter`. We manually call `TenantContext.setTenantId(event.tenantId())` before any DB access and `TenantContext.clear()` in the `finally` block. Without this, RLS would block all queries.
+
+2. **Idempotency via status check:** `TriageService.triageTicket()` already checks `if (ticket.getStatus() != NEW) → skip`. So if Kafka delivers a duplicate event (at-least-once guarantee), the second attempt harmlessly skips triage.
+
+3. **Error handling — catch, don't rethrow:** We catch all exceptions and log them rather than rethrowing. If we rethrew, Kafka would retry the same message indefinitely on permanent failures (e.g., ticket deleted, LLM down). In production, we'd push failed events to a Dead Letter Topic (DLT).
+
+4. **Separate consumer group:** We use `nexus-triage-group` (not the generic `nexus-app-group` from `application-dev.yml`). This lets us scale triage consumers independently from other consumers.
+
+#### Data flow (end-to-end)
+```
+User → POST /tickets → TicketService.createTicket()
+    → saves to DB
+    → publishes TicketCreatedEvent (Spring event bus)
+    → TicketEventKafkaPublisher catches it → sends to Kafka topic
+    → TriageEventConsumer picks it up from Kafka
+    → sets TenantContext from event payload
+    → calls TriageService.triageTicket()
+    → LLM classifies + drafts reply
+    → ticket updated: NEW → CLASSIFIED → AI_DRAFTED → AUTO_RESOLVED/ESCALATED
+```
