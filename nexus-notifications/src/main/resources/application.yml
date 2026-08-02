@@ -1,0 +1,24 @@
+# Nexus Notifications Microservice — Configuration
+# Runs on port 8081 to avoid conflict with nexus-app (8080).
+
+spring:
+  application:
+    name: nexus-notifications
+
+  kafka:
+    bootstrap-servers: localhost:19092
+    consumer:
+      group-id: nexus-notifications-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "*"
+        spring.json.value.default.type: com.nexus.notifications.consumer.TicketStatusChangedMessage
+
+server:
+  port: 8081
+
+logging:
+  level:
+    com.nexus.notifications: DEBUG

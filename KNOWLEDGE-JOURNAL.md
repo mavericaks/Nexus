@@ -1430,3 +1430,54 @@ Also added to `TicketRepository.java`:
 3. **Fault isolation per tenant:** If one tenant's sweep fails (e.g., DB timeout), we catch the exception and continue to the next tenant rather than aborting the entire sweep.
 
 4. **Event publishing on escalation:** When the SLA sweep escalates a ticket, it publishes a `TicketStatusChangedEvent` — this flows through the Kafka publisher so the notification service (Unit 7) can alert humans about SLA breaches.
+
+### Unit 7: Notification Microservice (Idempotent Consumer)
+
+#### The problem this unit solves
+When a ticket is escalated, auto-resolved, or picked up by an agent, *someone* needs to be notified — the support team, the customer, or both. This logic doesn't belong in the core API because:
+1. Sending emails/Slack messages is a **side effect** — it shouldn't block the API response.
+2. Notification logic changes independently from ticket logic (e.g., adding PagerDuty).
+3. If the notification service is down, ticket creation should still work.
+
+#### Architecture: First microservice extraction
+```
+nexus-app (port 8080)                    nexus-notifications (port 8081)
+┌──────────────────────┐                 ┌──────────────────────────┐
+│ TicketService        │                 │ NotificationEventConsumer│
+│   → publishes event  │                 │   ← @KafkaListener       │
+│   → KafkaTemplate    │ ──── Kafka ──── │   → InMemoryDedupStore   │
+│                      │  topic:         │   → NotificationDispatcher│
+│                      │  nexus.tickets. │     → Email (simulated)  │
+│                      │  status-changed │     → Slack (simulated)  │
+└──────────────────────┘                 └──────────────────────────┘
+```
+
+Key architectural principle: **nexus-notifications has ZERO compile-time dependency on nexus-app.** The only shared contract is the JSON schema on the Kafka topic. This means:
+- Independent deployment & release cycles
+- Independent scaling (notifications can have more consumers than the core API)
+- If nexus-notifications crashes, nexus-app continues working — Kafka buffers the events
+
+#### What we created
+
+| File | Purpose |
+|------|---------|
+| `nexus-notifications/pom.xml` | New Maven sub-module with spring-boot-starter-web + spring-kafka |
+| `NotificationApplication.java` | Spring Boot entry point (port 8081) |
+| `TicketStatusChangedMessage.java` | Independent event DTO — mirrors the nexus-app event schema |
+| `NotificationEventConsumer.java` | `@KafkaListener` on `nexus.tickets.status-changed` with dedup |
+| `NotificationDispatcher.java` | Routes events to appropriate channels (email/Slack simulators) |
+| `InMemoryDedupStore.java` | Idempotent Consumer Pattern using `ConcurrentHashMap` |
+| `application.yml` | Kafka config pointing to localhost:19092, port 8081 |
+
+Also updated:
+- `pom.xml` (parent): Added `<module>nexus-notifications</module>`
+
+#### Key design decisions
+
+1. **Idempotent Consumer Pattern:** The dedup key is `{ticketId}:{newStatus}`. If Kafka redelivers the same event (at-least-once guarantee), `InMemoryDedupStore.tryProcess()` returns `false` and we skip the duplicate. In production, this would use Redis `SETNX` with a TTL.
+
+2. **Independent event DTO:** `TicketStatusChangedMessage` uses `String` for status (not the enum from nexus-app). This avoids a compile-time dependency and is resilient to new statuses being added.
+
+3. **Simulated notifications:** `NotificationDispatcher` logs structured "SIMULATED EMAIL" and "SIMULATED SLACK" blocks at INFO level. This makes it easy to verify the pipeline works end-to-end without external integrations.
+
+4. **Separate consumer group:** `nexus-notifications-group` — completely independent from `nexus-app-group` and `nexus-triage-group`. Kafka delivers every event to every consumer group, so all three get their own copy.
