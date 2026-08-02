@@ -1355,3 +1355,16 @@ We use `ticketId.toString()` as the Kafka message key. This ensures all events f
 
 #### Gotcha: PowerShell BOM
 PowerShell's `-Encoding UTF8` writes a UTF-8 BOM (`\ufeff`) at the start of files. Java's compiler rejects this as an illegal character. Fixed by stripping the BOM bytes from all three new files.
+
+### Unit 4: Async Configuration & Security Context Propagation
+
+#### The problem this unit solves
+By default, if we use Spring's `@Async` to run background tasks, Spring executes them in a new thread. However, the `SecurityContext` (which holds our JWT and tenant ID) is bound to the *original* HTTP request thread. If the background thread tries to query the database, our `TenantAwareDataSource` won't find a tenant ID, and PostgreSQL Row-Level Security (RLS) will block the query.
+
+#### What we did
+Created `AsyncConfig.java` which:
+1. Enables `@Async` support globally.
+2. Configures a custom `ThreadPoolTaskExecutor` (named `NexusAsync-`).
+3. **Crucially:** Wraps the executor in Spring Security's `DelegatingSecurityContextAsyncTaskExecutor`.
+
+This magical wrapper automatically copies the `SecurityContext` from the original thread to the new background thread right before execution, and cleans it up afterwards. This ensures RLS continues to work seamlessly in background tasks.
