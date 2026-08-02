@@ -1402,3 +1402,31 @@ User → POST /tickets → TicketService.createTicket()
     → LLM classifies + drafts reply
     → ticket updated: NEW → CLASSIFIED → AI_DRAFTED → AUTO_RESOLVED/ESCALATED
 ```
+
+### Unit 6: Scheduled Jobs (SLA Sweep & KB Backfill)
+
+#### The problem this unit solves
+Two background processes that don't fit the event-driven model (they're time-driven, not event-driven):
+1. **SLA Sweep:** If a ticket has been sitting in `NEW` or `CLASSIFIED` for more than 4 hours, it means the async triage either failed or got stuck. The sweep auto-escalates these tickets to `ESCALATED` so a human agent can pick them up.
+2. **KB Backfill:** New knowledge base articles might not have vector embeddings yet. A nightly job generates them so RAG search stays accurate.
+
+#### What we created
+
+| File | Purpose |
+|------|---------|
+| `ScheduledJobs.java` | `@EnableScheduling` + two `@Scheduled` methods: `slaSweep()` (every 15 min) and `kbBackfill()` (daily at 2 AM) |
+
+Also added to `TicketRepository.java`:
+- `findByStatusInAndCreatedAtBefore()` — JPQL query to find tickets in `NEW`/`CLASSIFIED` created before the SLA cutoff time.
+
+#### Key design decisions
+
+1. **Per-tenant iteration:** Scheduled threads have no HTTP request, no JWT. We iterate `tenantRepository.findAll()` and manually set `TenantContext` for each tenant. This way RLS is enforced correctly per tenant, and we don't need a privileged datasource.
+
+2. **Configurable via application.yml:** Both schedules are externalized:
+   - `nexus.scheduling.sla-sweep-ms` (default: 900000 = 15 min)
+   - `nexus.scheduling.kb-backfill-cron` (default: `0 0 2 * * *` = 2 AM daily)
+
+3. **Fault isolation per tenant:** If one tenant's sweep fails (e.g., DB timeout), we catch the exception and continue to the next tenant rather than aborting the entire sweep.
+
+4. **Event publishing on escalation:** When the SLA sweep escalates a ticket, it publishes a `TicketStatusChangedEvent` — this flows through the Kafka publisher so the notification service (Unit 7) can alert humans about SLA breaches.
