@@ -96,6 +96,12 @@ nexus:
     auto-resolve-enabled: true
     # Max KB articles to retrieve for RAG context.
     max-retrieval-results: 5
+  # ─── Rate Limiting (Phase 6) ────────────────────────────────────────
+  # Per-tenant sliding window rate limiter backed by Redis.
+  # In dev, set generously. In production, tie to plan tier.
+  rate-limit:
+    requests-per-window: 100
+    window-seconds: 60
 
 # ─── Spring AI — Groq (OpenAI-compatible endpoint) ──────────────────
 # Groq implements the OpenAI chat/completions API, so we use the

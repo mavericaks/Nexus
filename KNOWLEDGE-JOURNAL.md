@@ -1579,4 +1579,62 @@ We added `@Cacheable` to the `search()` method in `KnowledgeBaseSearchService`, 
 
 **Test result:** All 83 tests passing (BUILD SUCCESS).
 
+### Unit 3 — Per-Tenant Rate Limiting (Strategy Pattern + Redis)
+
+**What we built:**
+
+Per-tenant rate limiting using the Strategy pattern, backed by a Redis Lua script for atomic, distributed sliding window counters. This is one of the playbook's explicit requirements: "per-tenant rate limiting keyed to plan tier (Strategy pattern)."
+
+**Architecture — the Strategy pattern:**
+
+```
+RateLimitStrategy (interface)         ← Strategy pattern contract
+  └── SlidingWindowRateLimiter        ← current implementation (Redis Lua script)
+      └── future: TokenBucketLimiter  ← swap in without changing interceptor
+      └── future: TierAwareLimiter    ← different limits per plan tier
+
+RateLimitInterceptor (HandlerInterceptor)
+  └── uses RateLimitStrategy.tryAcquire(tenantId)
+  └── returns 429 + Retry-After header when denied
+
+WebMvcConfig (WebMvcConfigurer)
+  └── registers RateLimitInterceptor on /api/** paths
+```
+
+The Strategy pattern means the interceptor doesn't know or care *how* the rate limit is enforced — it just calls `tryAcquire(tenantId)`. Swapping from sliding window to token bucket (or adding tier-aware limits) requires only a new `RateLimitStrategy` implementation, not changing the interceptor.
+
+**The Redis Lua script (atomic sliding window):**
+
+The Lua script runs atomically on Redis in a single round-trip:
+1. `GET` the current count for the tenant's window key
+2. If `count >= limit` → return `[count, ttl]` (denied)
+3. `INCR` the counter
+4. If this is the first request in the window (`count == 1`), set `EXPIRE` with the window duration
+5. Return `[count, ttl]` (allowed)
+
+This is atomic because Redis executes Lua scripts as a single operation — no race conditions between INCR and EXPIRE, even under high concurrency.
+
+**Tenant isolation:**
+
+Each tenant gets its own Redis key: `rate_limit:tenant:{tenantId}`. Tenant A hitting their limit has zero impact on Tenant B. This is the "per-tenant" requirement from the playbook.
+
+**Fail-open design:**
+
+If Redis is unavailable, the rate limiter returns `allowed` instead of crashing. This is a conscious decision: rate limiting is a protection mechanism, not a core business function. It's better to temporarily allow unlimited requests than to take down the entire API because Redis is unreachable.
+
+**@ConditionalOnBean pattern for test compatibility:**
+
+The `SlidingWindowRateLimiter`, `RateLimitInterceptor`, and `WebMvcConfig` are all annotated with `@ConditionalOnBean(RedisConnectionFactory.class)`. This means the entire rate-limiting chain is only activated when Redis is actually configured. In test environments (where we exclude `RedisAutoConfiguration`), none of these beans are created, so tests continue to work without Redis.
+
+**Files changed:**
+- `nexus-app/src/main/java/com/nexus/common/ratelimit/RateLimitStrategy.java` — **[NEW]** Strategy pattern interface
+- `nexus-app/src/main/java/com/nexus/common/ratelimit/RateLimitResult.java` — **[NEW]** Result record (allowed/denied + remaining + retryAfter)
+- `nexus-app/src/main/java/com/nexus/common/ratelimit/SlidingWindowRateLimiter.java` — **[NEW]** Redis Lua script implementation
+- `nexus-app/src/main/java/com/nexus/common/ratelimit/RateLimitInterceptor.java` — **[NEW]** MVC interceptor (extracts tenant, checks limit, returns 429)
+- `nexus-app/src/main/java/com/nexus/common/config/WebMvcConfig.java` — **[NEW]** Registers interceptor on `/api/**`
+- `nexus-app/src/main/resources/application-dev.yml` — added `nexus.rate-limit` config (100 req/60s)
+
+**Test result:** All 83 tests passing (BUILD SUCCESS).
+
+
 
