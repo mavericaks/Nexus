@@ -62,6 +62,14 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
+  # ─── Redis configuration (Phase 6) ─────────────────────────────────
+  # Used for @Cacheable (RAG search results) and rate limiting.
+  # Port 16379 = Docker Compose host port. Production: Upstash Redis.
+  data:
+    redis:
+      host: localhost
+      port: 16379
+
 # ─── Security — JWT configuration ──────────────────────────────────
 # HMAC-SHA256 secret must be at least 256 bits (32 bytes).
 # This is a DEV-ONLY key — production would use env variable / Vault.
@@ -88,6 +96,12 @@ nexus:
     auto-resolve-enabled: true
     # Max KB articles to retrieve for RAG context.
     max-retrieval-results: 5
+  # ─── Rate Limiting (Phase 6) ────────────────────────────────────────
+  # Per-tenant sliding window rate limiter backed by Redis.
+  # In dev, set generously. In production, tie to plan tier.
+  rate-limit:
+    requests-per-window: 100
+    window-seconds: 60
 
 # ─── Spring AI — Groq (OpenAI-compatible endpoint) ──────────────────
 # Groq implements the OpenAI chat/completions API, so we use the

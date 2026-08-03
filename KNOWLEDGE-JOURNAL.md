@@ -1481,3 +1481,160 @@ Also updated:
 3. **Simulated notifications:** `NotificationDispatcher` logs structured "SIMULATED EMAIL" and "SIMULATED SLACK" blocks at INFO level. This makes it easy to verify the pipeline works end-to-end without external integrations.
 
 4. **Separate consumer group:** `nexus-notifications-group` — completely independent from `nexus-app-group` and `nexus-triage-group`. Kafka delivers every event to every consumer group, so all three get their own copy.
+
+---
+
+## Phase 6 — Caching, Resilience, Rate Limiting
+
+**Branch:** `phase-6-resilience`
+**Precondition:** Phase 5 gate met — all 83 tests green, Kafka async pipeline working, notifications microservice consuming events.
+
+**Goal (from playbook §5):** Redis for rate-limit counters and `@Cacheable` on the RAG lookup path; Resilience4j circuit breaker + retry wrapped around the LLM port; per-tenant rate limiting keyed to plan tier (Strategy pattern).
+
+**Gate:** Killing the Groq connection doesn't take down the API; rate limits enforced per tenant.
+
+### Unit 1 — Resilience4j Circuit Breaker + Retry on LLM Triage Path
+
+**What we built:**
+
+The Groq LLM API is an external dependency that can go down, time out, or rate-limit us at any time. Without protection, a Groq outage would cascade through our triage pipeline — every ticket submission would hang waiting for a dead network call, eventually exhausting thread pools and taking down the entire API.
+
+Resilience4j solves this with two patterns working together:
+
+1. **Retry** — transient failures (network hiccup, 503 from Groq) get retried up to 3 times with exponential backoff (500ms → 1s → 2s) before giving up. This handles the "Groq had a momentary blip" case without bothering the user.
+
+2. **Circuit Breaker** — if failures keep happening (50% of the last 10 calls fail), the circuit "opens" and immediately fast-fails all subsequent LLM calls for 30 seconds without even making a network request. This prevents thread starvation and gives Groq time to recover.
+
+**Architecture — why `callLlm()` is a separate method:**
+
+```
+triage()                          ← orchestrates the full pipeline
+  ├── kbSearchService.search()    ← RAG retrieval (still works when Groq is down)
+  ├── buildPrompt()               ← prompt construction (pure logic)
+  ├── callLlm()                   ← @CircuitBreaker + @Retry (Resilience4j proxied)
+  │     ├── chatClient.prompt()   ← actual network call to Groq
+  │     └── llmFallback()         ← invoked when circuit is OPEN or retries exhausted
+  └── parseResponse()             ← JSON parsing + confidence derivation
+```
+
+The circuit breaker wraps **only the LLM network call**, not the entire triage pipeline. This means:
+- RAG search still works even when Groq is down
+- The ticket still gets a fallback classification (GENERAL/MEDIUM, confidence=0.0, autoResolvable=false) for manual review
+- The API returns a response in milliseconds instead of hanging for 30+ seconds
+
+**Why the method is package-private (not private):**
+
+Resilience4j uses Spring AOP proxies to intercept method calls and wrap them with circuit breaker/retry logic. Spring AOP can only proxy **non-private** methods on Spring-managed beans. If `callLlm()` were `private`, the `@CircuitBreaker` and `@Retry` annotations would be **silently ignored** — one of the most common Resilience4j gotchas.
+
+**Configuration (`application.yml`):**
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| `slidingWindowType` | COUNT_BASED | Evaluates the last N calls, not a time window — more predictable |
+| `slidingWindowSize` | 10 | Last 10 calls are considered for failure rate |
+| `minimumNumberOfCalls` | 5 | Don't open the circuit until at least 5 calls have been made |
+| `failureRateThreshold` | 50% | If half the calls fail → open the circuit |
+| `waitDurationInOpenState` | 30s | Wait 30 seconds before sending a probe call |
+| `permittedNumberOfCallsInHalfOpenState` | 3 | Send 3 probe calls to test if Groq recovered |
+| `retry.maxAttempts` | 3 | Try up to 3 times before declaring failure |
+| `retry.waitDuration` | 500ms | Initial backoff between retries |
+| `exponentialBackoffMultiplier` | 2 | 500ms → 1s → 2s backoff |
+
+**Files changed:**
+- `nexus-app/pom.xml` — added `resilience4j-spring-boot3` (v2.2.0) and `spring-boot-starter-aop`
+- `nexus-app/src/main/java/com/nexus/ai/triage/TriageAgent.java` — extracted `callLlm()` with `@CircuitBreaker` + `@Retry`, added `llmFallback()`
+- `nexus-app/src/main/resources/application.yml` — added full Resilience4j circuit breaker and retry configuration
+
+**Test result:** All 82 tests passing (BUILD SUCCESS).
+
+### Unit 2 — Redis Caching on RAG Lookup Path
+
+**What we built:**
+
+Every time a ticket is triaged, the RAG pipeline calls the Gemini Embedding API to convert the query text into a vector, then runs a pgvector cosine similarity search against the knowledge base. For identical or very similar support queries (common in high-volume tenants — e.g., 50 users all asking "how do I reset my password" the same week), this is wasteful: the same query hits the same embedding API and returns the same KB articles every time.
+
+We added `@Cacheable` to the `search()` method in `KnowledgeBaseSearchService`, backed by Redis via a `RedisCacheManager`.
+
+**How it works:**
+
+1. First call with query `"password reset help"` → cache miss → calls Gemini embedding API → pgvector search → returns results → stores in Redis with key `rag_search::password reset help` and 1-hour TTL.
+2. Second call with the same query → cache hit → returns results directly from Redis → zero embedding API calls, zero DB queries.
+
+**Architecture decisions:**
+
+1. **Redis, not in-memory cache:** The playbook specifies Redis (Upstash in prod, local Docker in dev). Redis survives app restarts, can be shared across multiple app instances, and gives us a single data store for both caching and rate limiting (Unit 3).
+
+2. **JSON serialization, not Java serialization:** `GenericJackson2JsonRedisSerializer` stores cache values as human-readable JSON in Redis. This avoids coupling to Java class versions (which breaks silently on deploys) and makes debugging trivial (`redis-cli GET rag_search::...`).
+
+3. **1-hour TTL for RAG cache:** KB articles change infrequently (human authors add/edit them). One hour is aggressive enough to pick up new articles within a reasonable window, but conservative enough to provide real cache hit rates.
+
+4. **`spring.cache.type: none` in tests:** Tests don't need Redis. Setting `cache.type=none` disables all caching, and we exclude `RedisAutoConfiguration` so Spring doesn't try to connect to a non-existent Redis in the test environment.
+
+**Files changed:**
+- `nexus-app/pom.xml` — added `spring-boot-starter-data-redis`
+- `nexus-app/src/main/java/com/nexus/common/config/CacheConfig.java` — **[NEW]** `@EnableCaching` config with `RedisCacheManager`, JSON serialization, per-cache TTL overrides
+- `nexus-app/src/main/java/com/nexus/ai/rag/KnowledgeBaseSearchService.java` — added `@Cacheable(value = "rag_search", key = "#query")` to `search()`
+- `nexus-app/src/main/resources/application-dev.yml` — added `spring.data.redis` config (host: localhost, port: 16379)
+- `nexus-app/src/test/resources/application.yml` — added `spring.cache.type: none` and Redis auto-config exclusions
+
+**Test result:** All 83 tests passing (BUILD SUCCESS).
+
+### Unit 3 — Per-Tenant Rate Limiting (Strategy Pattern + Redis)
+
+**What we built:**
+
+Per-tenant rate limiting using the Strategy pattern, backed by a Redis Lua script for atomic, distributed sliding window counters. This is one of the playbook's explicit requirements: "per-tenant rate limiting keyed to plan tier (Strategy pattern)."
+
+**Architecture — the Strategy pattern:**
+
+```
+RateLimitStrategy (interface)         ← Strategy pattern contract
+  └── SlidingWindowRateLimiter        ← current implementation (Redis Lua script)
+      └── future: TokenBucketLimiter  ← swap in without changing interceptor
+      └── future: TierAwareLimiter    ← different limits per plan tier
+
+RateLimitInterceptor (HandlerInterceptor)
+  └── uses RateLimitStrategy.tryAcquire(tenantId)
+  └── returns 429 + Retry-After header when denied
+
+WebMvcConfig (WebMvcConfigurer)
+  └── registers RateLimitInterceptor on /api/** paths
+```
+
+The Strategy pattern means the interceptor doesn't know or care *how* the rate limit is enforced — it just calls `tryAcquire(tenantId)`. Swapping from sliding window to token bucket (or adding tier-aware limits) requires only a new `RateLimitStrategy` implementation, not changing the interceptor.
+
+**The Redis Lua script (atomic sliding window):**
+
+The Lua script runs atomically on Redis in a single round-trip:
+1. `GET` the current count for the tenant's window key
+2. If `count >= limit` → return `[count, ttl]` (denied)
+3. `INCR` the counter
+4. If this is the first request in the window (`count == 1`), set `EXPIRE` with the window duration
+5. Return `[count, ttl]` (allowed)
+
+This is atomic because Redis executes Lua scripts as a single operation — no race conditions between INCR and EXPIRE, even under high concurrency.
+
+**Tenant isolation:**
+
+Each tenant gets its own Redis key: `rate_limit:tenant:{tenantId}`. Tenant A hitting their limit has zero impact on Tenant B. This is the "per-tenant" requirement from the playbook.
+
+**Fail-open design:**
+
+If Redis is unavailable, the rate limiter returns `allowed` instead of crashing. This is a conscious decision: rate limiting is a protection mechanism, not a core business function. It's better to temporarily allow unlimited requests than to take down the entire API because Redis is unreachable.
+
+**@ConditionalOnBean pattern for test compatibility:**
+
+The `SlidingWindowRateLimiter`, `RateLimitInterceptor`, and `WebMvcConfig` are all annotated with `@ConditionalOnBean(RedisConnectionFactory.class)`. This means the entire rate-limiting chain is only activated when Redis is actually configured. In test environments (where we exclude `RedisAutoConfiguration`), none of these beans are created, so tests continue to work without Redis.
+
+**Files changed:**
+- `nexus-app/src/main/java/com/nexus/common/ratelimit/RateLimitStrategy.java` — **[NEW]** Strategy pattern interface
+- `nexus-app/src/main/java/com/nexus/common/ratelimit/RateLimitResult.java` — **[NEW]** Result record (allowed/denied + remaining + retryAfter)
+- `nexus-app/src/main/java/com/nexus/common/ratelimit/SlidingWindowRateLimiter.java` — **[NEW]** Redis Lua script implementation
+- `nexus-app/src/main/java/com/nexus/common/ratelimit/RateLimitInterceptor.java` — **[NEW]** MVC interceptor (extracts tenant, checks limit, returns 429)
+- `nexus-app/src/main/java/com/nexus/common/config/WebMvcConfig.java` — **[NEW]** Registers interceptor on `/api/**`
+- `nexus-app/src/main/resources/application-dev.yml` — added `nexus.rate-limit` config (100 req/60s)
+
+**Test result:** All 83 tests passing (BUILD SUCCESS).
+
+
+

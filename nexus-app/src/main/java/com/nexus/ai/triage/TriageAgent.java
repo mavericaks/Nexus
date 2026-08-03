@@ -7,6 +7,8 @@ import com.nexus.ai.rag.KnowledgeBaseSearchService;
 import com.nexus.ai.rag.RetrievedArticle;
 import com.nexus.ticket.domain.TicketCategory;
 import com.nexus.ticket.domain.TicketPriority;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.retry.annotation.Retry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -75,25 +77,64 @@ public class TriageAgent {
                     .map(RetrievedArticle::toPromptContext)
                     .collect(Collectors.joining("\n"));
 
-        // Step 3: Call the LLM
+        // Step 3: Call the LLM (protected by circuit breaker + retry)
         String systemPrompt = buildSystemPrompt();
         String userPrompt = buildUserPrompt(subject, description, kbContext);
 
         String llmResponse;
         try {
-            llmResponse = chatClient.prompt()
-                    .system(systemPrompt)
-                    .user(userPrompt)
-                    .call()
-                    .content();
-            log.debug("LLM response: {}", llmResponse);
+            llmResponse = callLlm(systemPrompt, userPrompt);
         } catch (Exception e) {
-            log.error("LLM call failed: {}", e.getMessage(), e);
+            // Circuit breaker opened or all retries exhausted — graceful fallback
+            log.error("LLM call failed (circuit breaker/retry exhausted): {}", e.getMessage());
             return fallbackResult(subject, articles);
         }
 
         // Step 4: Parse structured output
         return parseResponse(llmResponse, articles);
+    }
+
+    /**
+     * The actual LLM network call, isolated in its own method so Resilience4j
+     * can proxy it with circuit breaker and retry annotations.
+     *
+     * <p><b>Circuit breaker:</b> If Groq is down, this method will fail fast
+     * after the failure threshold is crossed, without making network calls.
+     * <p><b>Retry:</b> Transient failures (network hiccups, 503s) get retried
+     * up to 3 times with exponential backoff before giving up.
+     *
+     * <p>This method is package-private (not private) because Spring AOP
+     * proxies can only intercept non-private methods. Resilience4j annotations
+     * on private methods are silently ignored.
+     *
+     * @param systemPrompt the system prompt
+     * @param userPrompt   the user prompt with ticket + KB context
+     * @return the raw LLM response string
+     */
+    @CircuitBreaker(name = "groq-llm", fallbackMethod = "llmFallback")
+    @Retry(name = "groq-llm")
+    String callLlm(String systemPrompt, String userPrompt) {
+        log.debug("Calling LLM via Groq API...");
+        String response = chatClient.prompt()
+                .system(systemPrompt)
+                .user(userPrompt)
+                .call()
+                .content();
+        log.debug("LLM response received ({} chars)", response != null ? response.length() : 0);
+        return response;
+    }
+
+    /**
+     * Resilience4j fallback — invoked when the circuit breaker is OPEN
+     * or when all retry attempts are exhausted.
+     *
+     * <p>Returns null, which the caller (triage()) catches and converts
+     * into a proper fallback TriageResult for manual escalation.
+     */
+    @SuppressWarnings("unused") // Called reflectively by Resilience4j
+    String llmFallback(String systemPrompt, String userPrompt, Throwable t) {
+        log.warn("LLM fallback triggered (circuit breaker or retry exhausted): {}", t.getMessage());
+        throw new RuntimeException("LLM unavailable: " + t.getMessage(), t);
     }
 
     /**

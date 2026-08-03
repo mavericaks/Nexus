@@ -35,3 +35,36 @@ spring:
 # ─── Server ──────────────────────────────────────────────────────────
 server:
   port: 8080
+
+# ─── Resilience4j ────────────────────────────────────────────────────
+# Circuit breaker + retry config for the LLM (Groq) integration.
+# These settings protect the API from cascading failures when Groq is down.
+resilience4j:
+  circuitbreaker:
+    instances:
+      groq-llm:
+        # Register health indicator so actuator shows circuit state
+        registerHealthIndicator: true
+        # Use a count-based sliding window (last N calls)
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 10
+        # Minimum calls before the circuit breaker starts evaluating
+        minimumNumberOfCalls: 5
+        # If 50% of calls fail → open the circuit
+        failureRateThreshold: 50
+        # Stay open for 30 seconds before trying a half-open probe
+        waitDurationInOpenState: 30s
+        # Allow 3 probe calls in half-open state to test recovery
+        permittedNumberOfCallsInHalfOpenState: 3
+        # Automatically transition from open → half-open after wait
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+  retry:
+    instances:
+      groq-llm:
+        # Retry up to 3 times before giving up
+        maxAttempts: 3
+        # Wait 500ms between retries (exponential backoff kicks in)
+        waitDuration: 500ms
+        # Exponential backoff: 500ms → 1s → 2s
+        enableExponentialBackoff: true
+        exponentialBackoffMultiplier: 2
