@@ -1690,3 +1690,42 @@ RateLimitInterceptor       → HandlerInterceptor — checks rate limit (all log
 
 **Test result:** All 83 tests passing (BUILD SUCCESS).
 
+### Unit 2 — AI Decision Audit Logging
+
+**What we built:**
+
+A dedicated audit logging system for every AI triage decision. Every time the AI classifies a ticket, a structured audit record is logged with a separate logger name (`nexus.audit.triage`) so it can be routed independently from application logs.
+
+**Why a separate audit logger?**
+
+Application logs are noisy — they include Spring framework messages, Hibernate SQL, Kafka consumer rebalancing, etc. AI decision audits are business-critical records that need to be:
+- Easy to find (grep `AI_TRIAGE_DECISION`)
+- Routable to a separate store (ELK index, S3 bucket, compliance database)
+- Never accidentally suppressed by turning down log levels
+
+Using `LoggerFactory.getLogger("nexus.audit.triage")` instead of the class-level logger gives us a dedicated log category that can be configured independently in `logback-spring.xml`.
+
+**What gets logged:**
+
+Each audit record includes:
+
+| Field | Example | Purpose |
+|-------|---------|---------|
+| `ticketId` | `a1b2c3d4-...` | Which ticket was triaged |
+| `category` | `ACCOUNT` | What the AI classified it as |
+| `priority` | `HIGH` | What priority was assigned |
+| `confidence` | `0.8725` | Confidence score (4 decimal places) |
+| `autoResolvable` | `true/false` | Whether auto-resolution was triggered |
+| `durationMs` | `1423` | End-to-end triage time in milliseconds |
+| `suggestedReplyLength` | `156` | Length of the AI's drafted reply |
+| `reasoning` | `"Customer asking about..."` | Truncated to 200 chars |
+
+Plus `tenantId` and `traceId` from MDC (automatic via Unit 1's filters).
+
+Skipped triages (ticket not in NEW status) are also logged with `AI_TRIAGE_SKIPPED`.
+
+**Files changed:**
+- `nexus-app/src/main/java/com/nexus/ai/triage/TriageAuditLogger.java` — **[NEW]** structured audit logger with dedicated `nexus.audit.triage` logger name
+- `nexus-app/src/main/java/com/nexus/ai/triage/TriageService.java` — injected `TriageAuditLogger`, added `System.nanoTime()` timing, calls audit logger after every triage decision and on skip
+
+**Test result:** All 83 tests passing (BUILD SUCCESS).

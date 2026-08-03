@@ -35,12 +35,14 @@ public class TriageService {
     private final TicketRepository ticketRepository;
     private final TriageAgent triageAgent;
     private final ApplicationEventPublisher eventPublisher;
+    private final TriageAuditLogger auditLogger;
 
     public TriageService(TicketRepository ticketRepository, TriageAgent triageAgent,
-                         ApplicationEventPublisher eventPublisher) {
+                         ApplicationEventPublisher eventPublisher, TriageAuditLogger auditLogger) {
         this.ticketRepository = ticketRepository;
         this.triageAgent = triageAgent;
         this.eventPublisher = eventPublisher;
+        this.auditLogger = auditLogger;
     }
 
     /**
@@ -60,6 +62,7 @@ public class TriageService {
         // Only triage tickets in NEW status
         if (ticket.getStatus() != TicketStatus.NEW) {
             log.warn("Ticket {} is in status {}, not NEW — skipping triage", ticketId, ticket.getStatus());
+            auditLogger.logTriageSkipped(ticketId, ticket.getStatus().name());
             return new TriageResult(
                     ticket.getCategory(), ticket.getPriority(),
                     ticket.getAiResponse(), "Ticket already triaged",
@@ -68,8 +71,10 @@ public class TriageService {
             );
         }
 
-        // Run triage agent
+        // Run triage agent (timed for audit logging and metrics)
+        long startNanos = System.nanoTime();
         TriageResult result = triageAgent.triage(ticket.getSubject(), ticket.getDescription());
+        long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
 
         // Update ticket with AI results
         ticket.setCategory(result.category());
@@ -117,6 +122,9 @@ public class TriageService {
         ticketRepository.save(ticket);
         log.info("Triage complete for ticket {}: category={}, confidence={:.2f}, status={}",
                 ticketId, result.category(), result.confidenceScore(), ticket.getStatus());
+
+        // Audit log — structured record of the AI decision
+        auditLogger.logTriageDecision(ticketId, result, durationMs);
 
         return result;
     }
