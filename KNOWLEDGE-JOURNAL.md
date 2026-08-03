@@ -1481,3 +1481,69 @@ Also updated:
 3. **Simulated notifications:** `NotificationDispatcher` logs structured "SIMULATED EMAIL" and "SIMULATED SLACK" blocks at INFO level. This makes it easy to verify the pipeline works end-to-end without external integrations.
 
 4. **Separate consumer group:** `nexus-notifications-group` — completely independent from `nexus-app-group` and `nexus-triage-group`. Kafka delivers every event to every consumer group, so all three get their own copy.
+
+---
+
+## Phase 6 — Caching, Resilience, Rate Limiting
+
+**Branch:** `phase-6-resilience`
+**Precondition:** Phase 5 gate met — all 83 tests green, Kafka async pipeline working, notifications microservice consuming events.
+
+**Goal (from playbook §5):** Redis for rate-limit counters and `@Cacheable` on the RAG lookup path; Resilience4j circuit breaker + retry wrapped around the LLM port; per-tenant rate limiting keyed to plan tier (Strategy pattern).
+
+**Gate:** Killing the Groq connection doesn't take down the API; rate limits enforced per tenant.
+
+### Unit 1 — Resilience4j Circuit Breaker + Retry on LLM Triage Path
+
+**What we built:**
+
+The Groq LLM API is an external dependency that can go down, time out, or rate-limit us at any time. Without protection, a Groq outage would cascade through our triage pipeline — every ticket submission would hang waiting for a dead network call, eventually exhausting thread pools and taking down the entire API.
+
+Resilience4j solves this with two patterns working together:
+
+1. **Retry** — transient failures (network hiccup, 503 from Groq) get retried up to 3 times with exponential backoff (500ms → 1s → 2s) before giving up. This handles the "Groq had a momentary blip" case without bothering the user.
+
+2. **Circuit Breaker** — if failures keep happening (50% of the last 10 calls fail), the circuit "opens" and immediately fast-fails all subsequent LLM calls for 30 seconds without even making a network request. This prevents thread starvation and gives Groq time to recover.
+
+**Architecture — why `callLlm()` is a separate method:**
+
+```
+triage()                          ← orchestrates the full pipeline
+  ├── kbSearchService.search()    ← RAG retrieval (still works when Groq is down)
+  ├── buildPrompt()               ← prompt construction (pure logic)
+  ├── callLlm()                   ← @CircuitBreaker + @Retry (Resilience4j proxied)
+  │     ├── chatClient.prompt()   ← actual network call to Groq
+  │     └── llmFallback()         ← invoked when circuit is OPEN or retries exhausted
+  └── parseResponse()             ← JSON parsing + confidence derivation
+```
+
+The circuit breaker wraps **only the LLM network call**, not the entire triage pipeline. This means:
+- RAG search still works even when Groq is down
+- The ticket still gets a fallback classification (GENERAL/MEDIUM, confidence=0.0, autoResolvable=false) for manual review
+- The API returns a response in milliseconds instead of hanging for 30+ seconds
+
+**Why the method is package-private (not private):**
+
+Resilience4j uses Spring AOP proxies to intercept method calls and wrap them with circuit breaker/retry logic. Spring AOP can only proxy **non-private** methods on Spring-managed beans. If `callLlm()` were `private`, the `@CircuitBreaker` and `@Retry` annotations would be **silently ignored** — one of the most common Resilience4j gotchas.
+
+**Configuration (`application.yml`):**
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| `slidingWindowType` | COUNT_BASED | Evaluates the last N calls, not a time window — more predictable |
+| `slidingWindowSize` | 10 | Last 10 calls are considered for failure rate |
+| `minimumNumberOfCalls` | 5 | Don't open the circuit until at least 5 calls have been made |
+| `failureRateThreshold` | 50% | If half the calls fail → open the circuit |
+| `waitDurationInOpenState` | 30s | Wait 30 seconds before sending a probe call |
+| `permittedNumberOfCallsInHalfOpenState` | 3 | Send 3 probe calls to test if Groq recovered |
+| `retry.maxAttempts` | 3 | Try up to 3 times before declaring failure |
+| `retry.waitDuration` | 500ms | Initial backoff between retries |
+| `exponentialBackoffMultiplier` | 2 | 500ms → 1s → 2s backoff |
+
+**Files changed:**
+- `nexus-app/pom.xml` — added `resilience4j-spring-boot3` (v2.2.0) and `spring-boot-starter-aop`
+- `nexus-app/src/main/java/com/nexus/ai/triage/TriageAgent.java` — extracted `callLlm()` with `@CircuitBreaker` + `@Retry`, added `llmFallback()`
+- `nexus-app/src/main/resources/application.yml` — added full Resilience4j circuit breaker and retry configuration
+
+**Test result:** All 82 tests passing (BUILD SUCCESS).
+
