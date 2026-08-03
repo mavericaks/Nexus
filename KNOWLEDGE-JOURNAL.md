@@ -1636,5 +1636,57 @@ The `SlidingWindowRateLimiter`, `RateLimitInterceptor`, and `WebMvcConfig` are a
 
 **Test result:** All 83 tests passing (BUILD SUCCESS).
 
+---
 
+## Phase 7 — Observability
+
+**Branch:** `phase-7-observability`
+**Precondition:** Phase 6 gate met — circuit breaker + retry on LLM path, Redis caching on RAG, per-tenant rate limiting. All 83 tests green.
+
+**Goal (from playbook §5):** Structured JSON logging with `tenantId`/`traceId` on every line; audit logging of every AI decision; Micrometer instrumentation; Prometheus scrape config; Grafana dashboard.
+
+**Gate:** A real Grafana dashboard shows real triage metrics.
+
+### Unit 1 — Structured JSON Logging + tenantId/traceId MDC
+
+**What we built:**
+
+Three things that work together to make every log line useful for debugging in production:
+
+1. **TraceIdFilter** — a servlet filter at `@Order(-1)` that generates a UUID `traceId` for every incoming request, injects it into Logback's MDC (Mapped Diagnostic Context), and returns it in the `X-Trace-Id` response header. This means:
+   - Every log line during a request automatically includes the trace ID
+   - API consumers get the trace ID back in the response header
+   - When a customer says "I got an error," support can ask for the trace ID and grep the logs
+
+2. **TenantContextFilter MDC integration** — the existing filter now also calls `MDC.put("tenantId", tenantId)` when setting the tenant context, and `MDC.remove("tenantId")` in the finally block. This means every log line also includes the tenant ID, so you can filter logs by tenant when debugging multi-tenant issues.
+
+3. **logback-spring.xml** — profile-aware Logback configuration:
+   - **Dev profile:** Human-readable colored console output with tenantId/traceId inline:
+     ```
+     00:18:01.145 INFO  [http-nio-8080-exec-1] c.n.ai.triage.TriageAgent - [tenant=abc123] [trace=7f2d...] Triaging ticket: 'Password reset'
+     ```
+   - **Production profile (non-dev):** Structured JSON output where MDC fields appear automatically:
+     ```json
+     {"timestamp":"...","level":"INFO","loggerName":"c.n.ai.triage.TriageAgent","message":"Triaging ticket: 'Password reset'","mdc":{"tenantId":"abc123","traceId":"7f2d..."}}
+     ```
+
+**Why MDC instead of manually logging the tenant/trace?**
+
+Without MDC, every log statement would need to manually include `tenantId` and `traceId` — easy to forget, and impossible to enforce across third-party libraries. MDC is a thread-local map that Logback automatically includes in every log line. We set it once in the filter, and every log statement (ours and Spring's) gets it for free.
+
+**Filter ordering:**
+
+```
+Spring Security filters    → @Order(-100)  — JWT validation
+TraceIdFilter              → @Order(-1)    — generates traceId, puts in MDC
+TenantContextFilter        → @Order(0)     — extracts tenantId, puts in MDC + TenantContext
+RateLimitInterceptor       → HandlerInterceptor — checks rate limit (all logs already have trace+tenant)
+```
+
+**Files changed:**
+- `nexus-app/src/main/java/com/nexus/common/observability/TraceIdFilter.java` — **[NEW]** generates UUID traceId per request, MDC + X-Trace-Id header
+- `nexus-app/src/main/java/com/nexus/common/multitenancy/TenantContextFilter.java` — added `MDC.put("tenantId")` and `MDC.remove("tenantId")`
+- `nexus-app/src/main/resources/logback-spring.xml` — **[NEW]** profile-aware Logback config (dev=colored text, prod=structured JSON)
+
+**Test result:** All 83 tests passing (BUILD SUCCESS).
 

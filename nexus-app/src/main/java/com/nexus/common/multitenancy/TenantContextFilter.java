@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.core.Authentication;
@@ -75,15 +76,18 @@ public class TenantContextFilter implements Filter {
                         return;
                     }
                     TenantContext.setTenantId(jwtTenantId);
+                    MDC.put("tenantId", jwtTenantId);
                     log.debug("Tenant context set from JWT + URL: {}", jwtTenantId);
                 } else if (jwtTenantId != null) {
                     // JWT only (e.g., endpoints without tenantId in URL)
                     TenantContext.setTenantId(jwtTenantId);
+                    MDC.put("tenantId", jwtTenantId);
                     log.debug("Tenant context set from JWT: {}", jwtTenantId);
                 } else if (urlTenantId != null) {
                     // URL only (e.g., unauthenticated endpoints — shouldn't happen
                     // after Phase 3, but kept for backward compatibility)
                     TenantContext.setTenantId(urlTenantId);
+                    MDC.put("tenantId", urlTenantId);
                     log.debug("Tenant context set from URL: {}", urlTenantId);
                 }
             }
@@ -92,6 +96,7 @@ public class TenantContextFilter implements Filter {
             // CRITICAL: always clear to prevent tenant leakage between
             // requests on the same Tomcat thread.
             TenantContext.clear();
+            MDC.remove("tenantId");
         }
     }
 
