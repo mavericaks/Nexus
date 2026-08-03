@@ -114,6 +114,15 @@
             <artifactId>spring-boot-starter-aop</artifactId>
         </dependency>
 
+        <!-- ==================== CACHING ==================== -->
+
+        <!-- Spring Data Redis — connects to Redis for @Cacheable and rate limiting.
+             Locally: Docker Redis on port 16379. Production: Upstash Redis. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
         <!-- ==================== TESTING ==================== -->
 
         <!-- Spring Boot Test — JUnit 5, Mockito, Spring test context, assertions -->

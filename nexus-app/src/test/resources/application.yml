@@ -33,4 +33,16 @@ spring:
       genai:
         embedding:
           api-key: test-gemini-key-not-real
-
+  # Disable caching in tests — no Redis required.
+  # Tests verify logic, not cache infrastructure.
+  cache:
+    type: none
+  # Prevent Spring Data Redis auto-config from failing when no Redis is available.
+  data:
+    redis:
+      host: localhost
+      port: 16379
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration

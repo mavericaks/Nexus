@@ -62,6 +62,14 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
+  # ─── Redis configuration (Phase 6) ─────────────────────────────────
+  # Used for @Cacheable (RAG search results) and rate limiting.
+  # Port 16379 = Docker Compose host port. Production: Upstash Redis.
+  data:
+    redis:
+      host: localhost
+      port: 16379
+
 # ─── Security — JWT configuration ──────────────────────────────────
 # HMAC-SHA256 secret must be at least 256 bits (32 bytes).
 # This is a DEV-ONLY key — production would use env variable / Vault.

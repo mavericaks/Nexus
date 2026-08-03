@@ -3,8 +3,10 @@ package com.nexus.ai.rag;
 import com.nexus.ai.config.AiProperties;
 import com.nexus.ai.embedding.EmbeddingService;
 import com.nexus.ai.knowledge.KnowledgeArticleRepository;
+import com.nexus.common.config.CacheConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -42,9 +44,14 @@ public class KnowledgeBaseSearchService {
     /**
      * Searches the knowledge base for articles similar to the given query.
      *
+     * <p>Results are cached in Redis ({@link CacheConfig#RAG_SEARCH_CACHE})
+     * with a 1-hour TTL. This avoids hitting the embedding API + pgvector
+     * for identical support queries (common in high-volume tenants).
+     *
      * @param query the search query (typically ticket subject + description)
      * @return list of retrieved articles, ordered by similarity (best first)
      */
+    @Cacheable(value = CacheConfig.RAG_SEARCH_CACHE, key = "#query")
     public List<RetrievedArticle> search(String query) {
         log.info("Searching knowledge base for: '{}'", truncate(query, 100));
 

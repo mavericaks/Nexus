@@ -1547,3 +1547,36 @@ Resilience4j uses Spring AOP proxies to intercept method calls and wrap them wit
 
 **Test result:** All 82 tests passing (BUILD SUCCESS).
 
+### Unit 2 — Redis Caching on RAG Lookup Path
+
+**What we built:**
+
+Every time a ticket is triaged, the RAG pipeline calls the Gemini Embedding API to convert the query text into a vector, then runs a pgvector cosine similarity search against the knowledge base. For identical or very similar support queries (common in high-volume tenants — e.g., 50 users all asking "how do I reset my password" the same week), this is wasteful: the same query hits the same embedding API and returns the same KB articles every time.
+
+We added `@Cacheable` to the `search()` method in `KnowledgeBaseSearchService`, backed by Redis via a `RedisCacheManager`.
+
+**How it works:**
+
+1. First call with query `"password reset help"` → cache miss → calls Gemini embedding API → pgvector search → returns results → stores in Redis with key `rag_search::password reset help` and 1-hour TTL.
+2. Second call with the same query → cache hit → returns results directly from Redis → zero embedding API calls, zero DB queries.
+
+**Architecture decisions:**
+
+1. **Redis, not in-memory cache:** The playbook specifies Redis (Upstash in prod, local Docker in dev). Redis survives app restarts, can be shared across multiple app instances, and gives us a single data store for both caching and rate limiting (Unit 3).
+
+2. **JSON serialization, not Java serialization:** `GenericJackson2JsonRedisSerializer` stores cache values as human-readable JSON in Redis. This avoids coupling to Java class versions (which breaks silently on deploys) and makes debugging trivial (`redis-cli GET rag_search::...`).
+
+3. **1-hour TTL for RAG cache:** KB articles change infrequently (human authors add/edit them). One hour is aggressive enough to pick up new articles within a reasonable window, but conservative enough to provide real cache hit rates.
+
+4. **`spring.cache.type: none` in tests:** Tests don't need Redis. Setting `cache.type=none` disables all caching, and we exclude `RedisAutoConfiguration` so Spring doesn't try to connect to a non-existent Redis in the test environment.
+
+**Files changed:**
+- `nexus-app/pom.xml` — added `spring-boot-starter-data-redis`
+- `nexus-app/src/main/java/com/nexus/common/config/CacheConfig.java` — **[NEW]** `@EnableCaching` config with `RedisCacheManager`, JSON serialization, per-cache TTL overrides
+- `nexus-app/src/main/java/com/nexus/ai/rag/KnowledgeBaseSearchService.java` — added `@Cacheable(value = "rag_search", key = "#query")` to `search()`
+- `nexus-app/src/main/resources/application-dev.yml` — added `spring.data.redis` config (host: localhost, port: 16379)
+- `nexus-app/src/test/resources/application.yml` — added `spring.cache.type: none` and Redis auto-config exclusions
+
+**Test result:** All 83 tests passing (BUILD SUCCESS).
+
+
