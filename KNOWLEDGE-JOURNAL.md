@@ -1729,3 +1729,43 @@ Skipped triages (ticket not in NEW status) are also logged with `AI_TRIAGE_SKIPP
 - `nexus-app/src/main/java/com/nexus/ai/triage/TriageService.java` — injected `TriageAuditLogger`, added `System.nanoTime()` timing, calls audit logger after every triage decision and on skip
 
 **Test result:** All 83 tests passing (BUILD SUCCESS).
+
+### Unit 3 — Micrometer Metrics + Spring Actuator
+
+**What we built:**
+
+Added Spring Boot Actuator and Micrometer Prometheus registry to expose business metrics at `/actuator/prometheus`. These metrics are scraped by the Prometheus container we'll set up in Unit 4.
+
+**Metrics added:**
+
+1. **`ticket.triage.duration` (Timer)**
+   - **Where:** `TriageService`
+   - **Tags:** `category`, `autoResolved`
+   - **Why:** To track how long the AI takes to process tickets, including latency spikes from the Groq API.
+   - **Note:** Configured in `application.yml` to publish percentiles (p50, p90, p95, p99).
+
+2. **`ticket.triage.count` (Counter)**
+   - **Where:** `TriageService`
+   - **Tags:** `category`, `autoResolved`
+   - **Why:** To track the raw volume of tickets processed and the auto-resolution rate per category.
+
+3. **`ticket.triage.confidence` (DistributionSummary)**
+   - **Where:** `TriageService`
+   - **Tags:** `category`
+   - **Why:** To track the distribution of the AI's confidence scores. If confidence drops, it means the KB needs updating.
+
+4. **`rate_limit.denied.count` (Counter)**
+   - **Where:** `SlidingWindowRateLimiter`
+   - **Tags:** `tenantId`
+   - **Why:** To identify which tenants are aggressively hitting their rate limits.
+
+**Global Tags:**
+Added `application=nexus` as a global tag in `application.yml` so Grafana can filter these metrics easily in a multi-service environment.
+
+**Files changed:**
+- `nexus-app/pom.xml` — added `spring-boot-starter-actuator` and `micrometer-registry-prometheus`
+- `nexus-app/src/main/resources/application.yml` — exposed actuator endpoints (`health,info,prometheus,metrics`), added global `application: nexus` tag, enabled percentiles for `ticket.triage.duration`
+- `nexus-app/src/main/java/com/nexus/ai/triage/TriageService.java` — injected `MeterRegistry`, added `Timer`, `Counter`, and `DistributionSummary`
+- `nexus-app/src/main/java/com/nexus/common/ratelimit/SlidingWindowRateLimiter.java` — injected `MeterRegistry`, added `Counter` for denied requests
+
+**Test result:** All 83 tests passing (BUILD SUCCESS).

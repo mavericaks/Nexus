@@ -123,6 +123,22 @@
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
 
+        <!-- ==================== OBSERVABILITY ==================== -->
+
+        <!-- Spring Boot Actuator — exposes /actuator/health, /actuator/prometheus, etc.
+             Required for Micrometer metrics export and production health checks. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Micrometer Prometheus registry — formats Micrometer metrics in
+             Prometheus exposition format at /actuator/prometheus endpoint. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
         <!-- ==================== TESTING ==================== -->
 
         <!-- Spring Boot Test — JUnit 5, Mockito, Spring test context, assertions -->

@@ -1,5 +1,7 @@
 package com.nexus.common.ratelimit;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -46,6 +48,7 @@ public class SlidingWindowRateLimiter implements RateLimitStrategy {
     private final StringRedisTemplate redisTemplate;
     private final int maxRequests;
     private final int windowSeconds;
+    private final MeterRegistry meterRegistry;
 
     /**
      * Lua script for atomic sliding window rate limiting.
@@ -79,10 +82,12 @@ public class SlidingWindowRateLimiter implements RateLimitStrategy {
     public SlidingWindowRateLimiter(
             StringRedisTemplate redisTemplate,
             @Value("${nexus.rate-limit.requests-per-window:100}") int maxRequests,
-            @Value("${nexus.rate-limit.window-seconds:60}") int windowSeconds) {
+            @Value("${nexus.rate-limit.window-seconds:60}") int windowSeconds,
+            MeterRegistry meterRegistry) {
         this.redisTemplate = redisTemplate;
         this.maxRequests = maxRequests;
         this.windowSeconds = windowSeconds;
+        this.meterRegistry = meterRegistry;
         log.info("Rate limiter configured: {} requests per {} seconds", maxRequests, windowSeconds);
     }
 
@@ -110,6 +115,12 @@ public class SlidingWindowRateLimiter implements RateLimitStrategy {
         if (currentCount > maxRequests) {
             log.info("Rate limit exceeded for tenant {}: {}/{} requests, retry after {}ms",
                     key, currentCount, maxRequests, ttlMs);
+            // Micrometer: track rate limit denials per tenant
+            Counter.builder("rate_limit.denied.count")
+                    .description("Number of rate-limited requests")
+                    .tag("tenantId", key)
+                    .register(meterRegistry)
+                    .increment();
             return RateLimitResult.denied(ttlMs > 0 ? ttlMs : windowSeconds * 1000L);
         }
 
