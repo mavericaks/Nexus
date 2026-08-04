@@ -6,6 +6,10 @@ import com.nexus.ticket.domain.TicketStatus;
 import com.nexus.ticket.infrastructure.persistence.TicketEntity;
 import com.nexus.ticket.infrastructure.persistence.TicketRepository;
 import com.nexus.ticket.domain.event.TicketStatusChangedEvent;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -13,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Application service that orchestrates the AI triage flow for a ticket.
@@ -35,12 +40,17 @@ public class TriageService {
     private final TicketRepository ticketRepository;
     private final TriageAgent triageAgent;
     private final ApplicationEventPublisher eventPublisher;
+    private final TriageAuditLogger auditLogger;
+    private final MeterRegistry meterRegistry;
 
     public TriageService(TicketRepository ticketRepository, TriageAgent triageAgent,
-                         ApplicationEventPublisher eventPublisher) {
+                         ApplicationEventPublisher eventPublisher, TriageAuditLogger auditLogger,
+                         MeterRegistry meterRegistry) {
         this.ticketRepository = ticketRepository;
         this.triageAgent = triageAgent;
         this.eventPublisher = eventPublisher;
+        this.auditLogger = auditLogger;
+        this.meterRegistry = meterRegistry;
     }
 
     /**
@@ -60,6 +70,7 @@ public class TriageService {
         // Only triage tickets in NEW status
         if (ticket.getStatus() != TicketStatus.NEW) {
             log.warn("Ticket {} is in status {}, not NEW — skipping triage", ticketId, ticket.getStatus());
+            auditLogger.logTriageSkipped(ticketId, ticket.getStatus().name());
             return new TriageResult(
                     ticket.getCategory(), ticket.getPriority(),
                     ticket.getAiResponse(), "Ticket already triaged",
@@ -68,8 +79,10 @@ public class TriageService {
             );
         }
 
-        // Run triage agent
+        // Run triage agent (timed for audit logging and metrics)
+        long startNanos = System.nanoTime();
         TriageResult result = triageAgent.triage(ticket.getSubject(), ticket.getDescription());
+        long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
 
         // Update ticket with AI results
         ticket.setCategory(result.category());
@@ -117,6 +130,33 @@ public class TriageService {
         ticketRepository.save(ticket);
         log.info("Triage complete for ticket {}: category={}, confidence={:.2f}, status={}",
                 ticketId, result.category(), result.confidenceScore(), ticket.getStatus());
+
+        // Audit log — structured record of the AI decision
+        auditLogger.logTriageDecision(ticketId, result, durationMs);
+
+        // ─── Micrometer metrics ──────────────────────────────────────
+        // Timer: how long triage took end-to-end
+        Timer.builder("ticket.triage.duration")
+                .description("Time taken to triage a ticket")
+                .tag("category", result.category().name())
+                .tag("autoResolved", String.valueOf(result.autoResolvable()))
+                .register(meterRegistry)
+                .record(durationMs, TimeUnit.MILLISECONDS);
+
+        // Counter: triage count by category and auto-resolve outcome
+        Counter.builder("ticket.triage.count")
+                .description("Number of tickets triaged")
+                .tag("category", result.category().name())
+                .tag("autoResolved", String.valueOf(result.autoResolvable()))
+                .register(meterRegistry)
+                .increment();
+
+        // Distribution: confidence score distribution
+        DistributionSummary.builder("ticket.triage.confidence")
+                .description("Distribution of AI triage confidence scores")
+                .tag("category", result.category().name())
+                .register(meterRegistry)
+                .record(result.confidenceScore());
 
         return result;
     }

@@ -1636,5 +1636,165 @@ The `SlidingWindowRateLimiter`, `RateLimitInterceptor`, and `WebMvcConfig` are a
 
 **Test result:** All 83 tests passing (BUILD SUCCESS).
 
+---
 
+## Phase 7 — Observability
 
+**Branch:** `phase-7-observability`
+**Precondition:** Phase 6 gate met — circuit breaker + retry on LLM path, Redis caching on RAG, per-tenant rate limiting. All 83 tests green.
+
+**Goal (from playbook §5):** Structured JSON logging with `tenantId`/`traceId` on every line; audit logging of every AI decision; Micrometer instrumentation; Prometheus scrape config; Grafana dashboard.
+
+**Gate:** A real Grafana dashboard shows real triage metrics.
+
+### Unit 1 — Structured JSON Logging + tenantId/traceId MDC
+
+**What we built:**
+
+Three things that work together to make every log line useful for debugging in production:
+
+1. **TraceIdFilter** — a servlet filter at `@Order(-1)` that generates a UUID `traceId` for every incoming request, injects it into Logback's MDC (Mapped Diagnostic Context), and returns it in the `X-Trace-Id` response header. This means:
+   - Every log line during a request automatically includes the trace ID
+   - API consumers get the trace ID back in the response header
+   - When a customer says "I got an error," support can ask for the trace ID and grep the logs
+
+2. **TenantContextFilter MDC integration** — the existing filter now also calls `MDC.put("tenantId", tenantId)` when setting the tenant context, and `MDC.remove("tenantId")` in the finally block. This means every log line also includes the tenant ID, so you can filter logs by tenant when debugging multi-tenant issues.
+
+3. **logback-spring.xml** — profile-aware Logback configuration:
+   - **Dev profile:** Human-readable colored console output with tenantId/traceId inline:
+     ```
+     00:18:01.145 INFO  [http-nio-8080-exec-1] c.n.ai.triage.TriageAgent - [tenant=abc123] [trace=7f2d...] Triaging ticket: 'Password reset'
+     ```
+   - **Production profile (non-dev):** Structured JSON output where MDC fields appear automatically:
+     ```json
+     {"timestamp":"...","level":"INFO","loggerName":"c.n.ai.triage.TriageAgent","message":"Triaging ticket: 'Password reset'","mdc":{"tenantId":"abc123","traceId":"7f2d..."}}
+     ```
+
+**Why MDC instead of manually logging the tenant/trace?**
+
+Without MDC, every log statement would need to manually include `tenantId` and `traceId` — easy to forget, and impossible to enforce across third-party libraries. MDC is a thread-local map that Logback automatically includes in every log line. We set it once in the filter, and every log statement (ours and Spring's) gets it for free.
+
+**Filter ordering:**
+
+```
+Spring Security filters    → @Order(-100)  — JWT validation
+TraceIdFilter              → @Order(-1)    — generates traceId, puts in MDC
+TenantContextFilter        → @Order(0)     — extracts tenantId, puts in MDC + TenantContext
+RateLimitInterceptor       → HandlerInterceptor — checks rate limit (all logs already have trace+tenant)
+```
+
+**Files changed:**
+- `nexus-app/src/main/java/com/nexus/common/observability/TraceIdFilter.java` — **[NEW]** generates UUID traceId per request, MDC + X-Trace-Id header
+- `nexus-app/src/main/java/com/nexus/common/multitenancy/TenantContextFilter.java` — added `MDC.put("tenantId")` and `MDC.remove("tenantId")`
+- `nexus-app/src/main/resources/logback-spring.xml` — **[NEW]** profile-aware Logback config (dev=colored text, prod=structured JSON)
+
+**Test result:** All 83 tests passing (BUILD SUCCESS).
+
+### Unit 2 — AI Decision Audit Logging
+
+**What we built:**
+
+A dedicated audit logging system for every AI triage decision. Every time the AI classifies a ticket, a structured audit record is logged with a separate logger name (`nexus.audit.triage`) so it can be routed independently from application logs.
+
+**Why a separate audit logger?**
+
+Application logs are noisy — they include Spring framework messages, Hibernate SQL, Kafka consumer rebalancing, etc. AI decision audits are business-critical records that need to be:
+- Easy to find (grep `AI_TRIAGE_DECISION`)
+- Routable to a separate store (ELK index, S3 bucket, compliance database)
+- Never accidentally suppressed by turning down log levels
+
+Using `LoggerFactory.getLogger("nexus.audit.triage")` instead of the class-level logger gives us a dedicated log category that can be configured independently in `logback-spring.xml`.
+
+**What gets logged:**
+
+Each audit record includes:
+
+| Field | Example | Purpose |
+|-------|---------|---------|
+| `ticketId` | `a1b2c3d4-...` | Which ticket was triaged |
+| `category` | `ACCOUNT` | What the AI classified it as |
+| `priority` | `HIGH` | What priority was assigned |
+| `confidence` | `0.8725` | Confidence score (4 decimal places) |
+| `autoResolvable` | `true/false` | Whether auto-resolution was triggered |
+| `durationMs` | `1423` | End-to-end triage time in milliseconds |
+| `suggestedReplyLength` | `156` | Length of the AI's drafted reply |
+| `reasoning` | `"Customer asking about..."` | Truncated to 200 chars |
+
+Plus `tenantId` and `traceId` from MDC (automatic via Unit 1's filters).
+
+Skipped triages (ticket not in NEW status) are also logged with `AI_TRIAGE_SKIPPED`.
+
+**Files changed:**
+- `nexus-app/src/main/java/com/nexus/ai/triage/TriageAuditLogger.java` — **[NEW]** structured audit logger with dedicated `nexus.audit.triage` logger name
+- `nexus-app/src/main/java/com/nexus/ai/triage/TriageService.java` — injected `TriageAuditLogger`, added `System.nanoTime()` timing, calls audit logger after every triage decision and on skip
+
+**Test result:** All 83 tests passing (BUILD SUCCESS).
+
+### Unit 3 — Micrometer Metrics + Spring Actuator
+
+**What we built:**
+
+Added Spring Boot Actuator and Micrometer Prometheus registry to expose business metrics at `/actuator/prometheus`. These metrics are scraped by the Prometheus container we'll set up in Unit 4.
+
+**Metrics added:**
+
+1. **`ticket.triage.duration` (Timer)**
+   - **Where:** `TriageService`
+   - **Tags:** `category`, `autoResolved`
+   - **Why:** To track how long the AI takes to process tickets, including latency spikes from the Groq API.
+   - **Note:** Configured in `application.yml` to publish percentiles (p50, p90, p95, p99).
+
+2. **`ticket.triage.count` (Counter)**
+   - **Where:** `TriageService`
+   - **Tags:** `category`, `autoResolved`
+   - **Why:** To track the raw volume of tickets processed and the auto-resolution rate per category.
+
+3. **`ticket.triage.confidence` (DistributionSummary)**
+   - **Where:** `TriageService`
+   - **Tags:** `category`
+   - **Why:** To track the distribution of the AI's confidence scores. If confidence drops, it means the KB needs updating.
+
+4. **`rate_limit.denied.count` (Counter)**
+   - **Where:** `SlidingWindowRateLimiter`
+   - **Tags:** `tenantId`
+   - **Why:** To identify which tenants are aggressively hitting their rate limits.
+
+**Global Tags:**
+Added `application=nexus` as a global tag in `application.yml` so Grafana can filter these metrics easily in a multi-service environment.
+
+**Files changed:**
+- `nexus-app/pom.xml` — added `spring-boot-starter-actuator` and `micrometer-registry-prometheus`
+- `nexus-app/src/main/resources/application.yml` — exposed actuator endpoints (`health,info,prometheus,metrics`), added global `application: nexus` tag, enabled percentiles for `ticket.triage.duration`
+- `nexus-app/src/main/java/com/nexus/ai/triage/TriageService.java` — injected `MeterRegistry`, added `Timer`, `Counter`, and `DistributionSummary`
+- `nexus-app/src/main/java/com/nexus/common/ratelimit/SlidingWindowRateLimiter.java` — injected `MeterRegistry`, added `Counter` for denied requests
+
+**Test result:** All 83 tests passing (BUILD SUCCESS).
+
+### Unit 4 — Grafana Dashboard & Prometheus Compose Config
+
+**What we built:**
+
+We added Prometheus and Grafana to our local development stack (`docker-compose.yml`) and pre-provisioned them so that when you run `docker compose up -d`, you instantly get a fully working observability dashboard—no manual UI configuration required.
+
+**How it works:**
+1. **Prometheus Scrape Config:** `prometheus.yml` tells Prometheus to hit `http://host.docker.internal:8080/actuator/prometheus` every 15 seconds to collect the Micrometer metrics we instrumented in Unit 3.
+2. **Grafana Datasource Provisioning:** `datasource.yml` automatically registers Prometheus as a data source inside Grafana.
+3. **Grafana Dashboard Provisioning:** `dashboards.yml` tells Grafana to automatically load dashboards from a specific directory.
+4. **The Dashboard JSON:** `nexus-triage.json` contains a pre-built dashboard with panels for:
+   - Triage volume by category (Timeseries)
+   - Auto-resolve rate (Stat)
+   - Triage duration p50/p95 (Timeseries)
+   - Rate limit denials by tenant (Timeseries)
+   - Confidence score distribution (Timeseries)
+   - LLM Circuit breaker state (Stat)
+
+**Note on OpenTelemetry (OTel):** The playbook mentioned OTel distributed tracing as part of this phase, but we deferred it. The gate specifically asked for "a real Grafana dashboard shows real triage metrics." Adding full OTel (Jaeger/Zipkin + OpenTelemetry Collector + Spring Cloud Sleuth/Micrometer Tracing) is a massive infrastructure footprint that distracts from the core triage metrics. The MDC `traceId` (from Unit 1) provides sufficient log correlation for now.
+
+**Files changed:**
+- `docker-compose.yml` — added `prometheus` (port 19090) and `grafana` (port 13000) services and volumes.
+- `docker/prometheus.yml` — **[NEW]** Prometheus scrape configuration.
+- `docker/grafana/provisioning/datasources/datasource.yml` — **[NEW]** registers Prometheus in Grafana.
+- `docker/grafana/provisioning/dashboards/dashboards.yml` — **[NEW]** tells Grafana where to look for dashboards.
+- `docker/grafana/provisioning/dashboards/nexus-triage.json` — **[NEW]** the actual dashboard layout and PromQL queries.
+
+This completes **Phase 7**. The Phase 7 Gate is met: "A real Grafana dashboard shows real triage metrics."

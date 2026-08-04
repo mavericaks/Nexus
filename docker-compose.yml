@@ -77,6 +77,39 @@ services:
       retries: 10
       start_period: 30s
 
+  # ─── Prometheus ───────────────────────────────────────────────────
+  # Scrapes metrics from the Spring Boot /actuator/prometheus endpoint.
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: nexus-prometheus
+    ports:
+      - "19090:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - nexus-prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ─── Grafana ──────────────────────────────────────────────────────
+  # Visualizes the metrics collected by Prometheus.
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: nexus-grafana
+    ports:
+      - "13000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=nexus
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - nexus-grafana-data:/var/lib/grafana
+      # Provisioning directories (datasources & dashboards)
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+
 volumes:
   nexus-pg-data:
   nexus-redis-data:
+  nexus-prometheus-data:
+  nexus-grafana-data:

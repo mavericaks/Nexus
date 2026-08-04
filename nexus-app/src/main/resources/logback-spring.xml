@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logback configuration for Nexus.
+
+  Two appender profiles:
+  - "dev" profile:  human-readable console output with colors + tenantId/traceId
+  - "!dev" profile: structured JSON for production log aggregation (ELK, CloudWatch, etc.)
+
+  Both profiles include tenantId and traceId from MDC on every log line.
+  These values are injected by TraceIdFilter and TenantContextFilter.
+-->
+<configuration>
+
+    <!-- ==================== DEV PROFILE ==================== -->
+    <!-- Human-readable colored output for local development.
+         Includes tenantId/traceId inline so developers can correlate logs. -->
+    <springProfile name="dev">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%d{HH:mm:ss.SSS} %highlight(%-5level) [%thread] %cyan(%logger{36}) - [tenant=%X{tenantId:-none}] [trace=%X{traceId:-none}] %msg%n</pattern>
+            </encoder>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="CONSOLE" />
+        </root>
+
+        <!-- Reduce noise from framework internals -->
+        <logger name="org.springframework" level="WARN" />
+        <logger name="org.hibernate" level="WARN" />
+        <logger name="org.apache.kafka" level="WARN" />
+        <logger name="io.github.resilience4j" level="INFO" />
+
+        <!-- Nexus application logs at DEBUG for dev -->
+        <logger name="com.nexus" level="DEBUG" />
+    </springProfile>
+
+    <!-- ==================== PRODUCTION PROFILE ==================== -->
+    <!-- Structured JSON output for log aggregation systems.
+         Every log line is a valid JSON object with standard fields. -->
+    <springProfile name="!dev">
+        <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="ch.qos.logback.classic.encoder.JsonEncoder">
+                <!--
+                  JsonEncoder (Logback 1.5+) emits structured JSON with fields:
+                  timestamp, level, loggerName, message, threadName, mdc, context, throwable
+
+                  MDC fields (tenantId, traceId) are automatically included
+                  under the "mdc" key in every JSON log line.
+                -->
+            </encoder>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="JSON_CONSOLE" />
+        </root>
+
+        <!-- Reduce noise from framework internals -->
+        <logger name="org.springframework" level="WARN" />
+        <logger name="org.hibernate" level="WARN" />
+        <logger name="org.apache.kafka" level="WARN" />
+
+        <!-- Nexus application at INFO for production -->
+        <logger name="com.nexus" level="INFO" />
+
+        <!-- AI audit logger — always INFO, never suppressed -->
+        <logger name="nexus.audit.triage" level="INFO" additivity="false">
+            <appender-ref ref="JSON_CONSOLE" />
+        </logger>
+    </springProfile>
+
+</configuration>

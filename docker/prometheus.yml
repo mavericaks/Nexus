@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 15s # How often to scrape targets by default
+  evaluation_interval: 15s # How often to evaluate rules
+
+scrape_configs:
+  # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
+  - job_name: 'nexus-app'
+    # metrics_path defaults to '/metrics'
+    # scheme defaults to 'http'.
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      # host.docker.internal allows Prometheus (in a container) to reach the host's localhost (where Spring Boot is running)
+      - targets: ['host.docker.internal:8080']
