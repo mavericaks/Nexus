@@ -1852,3 +1852,30 @@ This lets the mock accurately simulate the state machine's multi-step transition
 - `nexus-app/src/test/java/com/nexus/ai/triage/TriageServiceTest.java` — **[NEW]** 6 tests covering all paths
 
 **Test result:** 89 tests passing (88 nexus-app + 1 nexus-notifications). BUILD SUCCESS.
+
+### Unit 2 — TriageController Test + JaCoCo
+
+**What we built:**
+
+1. **TriageControllerTest** — `@WebMvcTest` for the triage and backfill-kb endpoints:
+   - POST `/triage` returns 200 with all fields in the JSON response
+   - POST `/triage` returns 404 when ticket not found
+   - POST `/backfill-kb` returns 200 with integer count
+
+2. **JaCoCo Maven Plugin** — added to `nexus-app/pom.xml` for test coverage reporting:
+   - `prepare-agent` goal instruments classes during `test` phase
+   - `report` goal generates HTML + XML reports during `verify` phase
+   - Run `mvn verify` to generate the report at `target/site/jacoco/index.html`
+
+**Why `@AutoConfigureMockMvc(addFilters = false)`?**
+
+Same pattern as `TicketControllerTest`. Security filters (JWT, tenant, trace ID) are disabled because:
+- Security is tested separately in `TicketSecurityTest`
+- Controller tests focus on request/response mapping and service delegation
+- Mixing concerns makes tests brittle and hard to diagnose
+
+**Files changed:**
+- `nexus-app/src/test/java/com/nexus/ai/api/TriageControllerTest.java` — **[NEW]** 3 tests for triage and backfill endpoints
+- `nexus-app/pom.xml` — added `jacoco-maven-plugin` (v0.8.12)
+
+**Test result:** 92 tests passing (91 nexus-app + 1 nexus-notifications). BUILD SUCCESS.
