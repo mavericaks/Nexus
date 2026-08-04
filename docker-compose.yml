@@ -103,8 +103,10 @@ services:
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
     volumes:
       - nexus-grafana-data:/var/lib/grafana
-      # Provisioning directories (datasources & dashboards)
+      # Provisioning config (datasource + dashboard provider)
       - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      # Dashboard JSON files loaded by the provider above
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
 

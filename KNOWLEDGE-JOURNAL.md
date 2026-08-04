@@ -1798,3 +1798,57 @@ We added Prometheus and Grafana to our local development stack (`docker-compose.
 - `docker/grafana/provisioning/dashboards/nexus-triage.json` — **[NEW]** the actual dashboard layout and PromQL queries.
 
 This completes **Phase 7**. The Phase 7 Gate is met: "A real Grafana dashboard shows real triage metrics."
+
+---
+
+## Phase 8 — Testing Formalized
+
+**Branch:** `phase-8-testing`
+**Precondition:** Phase 7 gate met — Grafana dashboard provisioned with real triage metrics panels.
+
+**Goal (from playbook §5):** Every public `application` service method and every `domain` state transition has at least one test; coverage on domain + integration layers meets the bar.
+
+**Gate:** Test run output/coverage report. Specifically confirm Phase 1 RLS-bypass tests and Phase 6 circuit-breaker test are still passing.
+
+### Unit 1 — TriageService Test
+
+**What we built:**
+
+The biggest gap in test coverage was `TriageService.triageTicket()` — the core orchestration method that ties together the AI agent, state machine, event publishing, audit logging, and metrics. It had zero tests. Now it has 6.
+
+**Test structure:**
+
+```
+TriageServiceTest
+├── AutoResolve (3 tests)
+│   ├── triages NEW ticket → CLASSIFIED → AI_DRAFTED → AUTO_RESOLVED
+│   ├── records Micrometer metrics after triage
+│   └── calls audit logger after triage
+├── Escalation (1 test)
+│   └── triages low-confidence ticket → ESCALATED
+├── SkipTriage (1 test)
+│   └── skips triage when ticket is not in NEW status
+└── ErrorHandling (1 test)
+    └── throws TicketNotFoundException for unknown ticket ID
+```
+
+**Testing technique — mutable mock status:**
+
+The tricky part of testing `TriageService` is that it calls `ticket.setStatus()` multiple times (NEW → CLASSIFIED → AI_DRAFTED → AUTO_RESOLVED), and the next transition depends on the *current* status. A simple `when(ticket.getStatus()).thenReturn(TicketStatus.NEW)` would always return NEW, breaking the state machine.
+
+Solution: use a mutable `TicketStatus[]` array captured in the mock's answer:
+```java
+final TicketStatus[] currentStatus = {TicketStatus.NEW};
+when(ticket.getStatus()).thenAnswer(inv -> currentStatus[0]);
+doAnswer(inv -> { currentStatus[0] = inv.getArgument(0); return null; })
+        .when(ticket).setStatus(any(TicketStatus.class));
+```
+
+This lets the mock accurately simulate the state machine's multi-step transition.
+
+**Micrometer in tests:** Used `SimpleMeterRegistry` (the in-memory implementation designed for testing) instead of mocking `MeterRegistry`. This lets us verify that metrics are actually recorded, not just that a method was called.
+
+**Files changed:**
+- `nexus-app/src/test/java/com/nexus/ai/triage/TriageServiceTest.java` — **[NEW]** 6 tests covering all paths
+
+**Test result:** 89 tests passing (88 nexus-app + 1 nexus-notifications). BUILD SUCCESS.
