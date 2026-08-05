@@ -5,6 +5,7 @@ import com.nexus.common.multitenancy.TenantContext;
 import com.nexus.ticket.domain.event.TicketCreatedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
@@ -28,6 +29,7 @@ import org.springframework.stereotype.Component;
  * {@code CLASSIFIED/AI_DRAFTED/ESCALATED} and triage will be skipped.
  */
 @Component
+@ConditionalOnProperty(name = "spring.kafka.bootstrap-servers")
 public class TriageEventConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(TriageEventConsumer.class);

@@ -1,0 +1,98 @@
+# Nexus — Production Profile
+# Activated with: --spring.profiles.active=prod
+# All sensitive values come from environment variables — NEVER hardcoded.
+
+spring:
+  # ─── Datasource — Neon Postgres ──────────────────────────────────
+  # Uses the DATABASE_URL env var set in Render's dashboard.
+  # Neon requires SSL — ?sslmode=require is in the connection string.
+  datasource:
+    url: ${DATABASE_URL}
+    driver-class-name: org.postgresql.Driver
+
+  # ─── JPA — no SQL logging in prod ─────────────────────────────────
+  jpa:
+    show-sql: false
+
+  # ─── Flyway — runs as the owner role ──────────────────────────────
+  # In production, Flyway uses the same DATABASE_URL (owner role).
+  flyway:
+    url: ${DATABASE_URL}
+    clean-disabled: true  # NEVER allow clean in production
+
+  # ─── OAuth2 — Google login ─────────────────────────────────────────
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET}
+            scope: openid, email, profile
+
+  # ─── Kafka — disabled in production for now ────────────────────────
+  # Render free tier doesn't include Kafka. Disable auto-config.
+  # Re-enable when a managed Kafka service (Confluent Cloud, etc.) is added.
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration
+
+  # ─── Redis — Upstash ──────────────────────────────────────────────
+  data:
+    redis:
+      host: ${REDIS_HOST:}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL:false}
+
+# ─── Security — JWT ──────────────────────────────────────────────────
+nexus:
+  security:
+    jwt:
+      secret: ${JWT_SECRET}
+      expiration-hours: 24
+      issuer: nexus-prod
+    # Auth datasource — same as main datasource in prod (no separate RLS bypass needed
+    # since we use the owner role for the managed database).
+    auth-datasource:
+      jdbc-url: ${DATABASE_URL}
+      username: ${DB_USERNAME:}
+      password: ${DB_PASSWORD:}
+  ai:
+    confidence-threshold: 0.75
+    auto-resolve-enabled: true
+    max-retrieval-results: 5
+  rate-limit:
+    requests-per-window: 60
+    window-seconds: 60
+
+# ─── Spring AI — Groq ────────────────────────────────────────────────
+spring.ai:
+  openai:
+    api-key: ${GROQ_API_KEY}
+    base-url: https://api.groq.com/openai
+    chat:
+      options:
+        model: llama-3.3-70b-versatile
+        temperature: 0.1
+        max-tokens: 2048
+  google:
+    genai:
+      embedding:
+        api-key: ${GEMINI_API_KEY}
+        options:
+          model: text-embedding-004
+
+# ─── Logging — structured JSON only, no DEBUG noise ──────────────────
+logging:
+  level:
+    com.nexus: INFO
+    org.springframework.security: WARN
+
+# ─── Swagger — disabled in production ────────────────────────────────
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

@@ -1,0 +1,39 @@
+# Git
+.git
+.gitignore
+
+# Build output
+target/
+**/target/
+
+# Secrets
+.env
+.env.*
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.antigravity/
+
+# Docker
+docker/
+docker-compose.yml
+
+# Docs (not needed in image)
+docs/
+*.md
+!README.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Frontend
+node_modules/
+dist/
+
+# Scripts
+*.ps1
+*.sh
+!mvnw

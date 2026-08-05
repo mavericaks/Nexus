@@ -1951,3 +1951,77 @@ This completes **Phase 8**. The Phase 8 Gate is met:
 - ✅ Application layer: 77–87% coverage
 - ✅ Phase 1 RLS-bypass tests: still passing
 - ✅ Phase 6 circuit-breaker fallback tests: still passing
+
+---
+
+## Phase 9 — CI/CD + Deploy
+
+**Branch:** `phase-9-deploy`
+**Precondition:** Phase 8 gate met — 92 tests, domain 100% coverage.
+
+**Goal (from playbook §5):** Green pipeline, live URL reachable.
+
+**Gate:** CI badge in README linking to a genuinely green run; the live Render URL responding to a real request.
+
+### Unit 1 — Dockerfile + Maven Wrapper
+
+**What we built:**
+
+A Docker multi-stage build for the Nexus application:
+
+1. **Stage 1 (build):** Uses `eclipse-temurin:21-jdk`, copies Maven wrapper + POMs first (layer caching), downloads dependencies, then copies source and builds the fat JAR with `mvn package -DskipTests`.
+
+2. **Stage 2 (runtime):** Uses `eclipse-temurin:21-jre` (slim), copies only the built JAR. Runs as non-root `nexus` user for security. JVM tuned for containers with `UseContainerSupport` and `MaxRAMPercentage=75%`.
+
+Also generated the Maven wrapper (`mvnw`) so CI doesn't need Maven pre-installed.
+
+**Files changed:**
+- `Dockerfile` — **[NEW]** Multi-stage build
+- `.dockerignore` — **[NEW]** Excludes .git, target, .env, IDE files
+- `mvnw` + `.mvn/wrapper/maven-wrapper.properties` — **[NEW]** Maven wrapper
+
+### Unit 2 — GitHub Actions CI Pipeline
+
+**What we built:**
+
+The full 8-step pipeline from playbook §6:
+
+| Step | Job | What it does |
+|------|-----|-------------|
+| 1 | `lint` | `mvn compile` — fails fast on syntax errors |
+| 2 | `secret-scan` | Gitleaks action — catches accidentally committed secrets |
+| 3 | `stub-grep` | Fails if `STUB:` markers remain on main |
+| 4 | `dependency-scan` | OWASP Dependency Check (CVSSv3 ≥ 9 fails build) |
+| 5-6 | `test` | `mvn verify` with Testcontainers (Postgres pgvector + Kafka) |
+| 7 | `docker-build` | Builds the Docker image to verify it works |
+| 8 | `deploy` | Triggers Render deploy hook (main branch only) |
+
+**Parallelism:** Steps 1-4 run in parallel (no dependencies). Step 5-6 (tests) needs lint + stub-grep. Step 7 needs all tests + security steps. Step 8 needs Docker build and only runs on `main` pushes.
+
+**Files changed:**
+- `.github/workflows/ci.yml` — **[REWRITE]** Full 8-step pipeline
+- `.github/owasp-suppressions.xml` — **[NEW]** Empty suppressions file for false positives
+
+### Unit 3 — Production Configuration
+
+**What we built:**
+
+1. **`application-prod.yml`** — Production Spring profile:
+   - All secrets from environment variables (`DATABASE_URL`, `JWT_SECRET`, `GROQ_API_KEY`, etc.)
+   - Kafka excluded (Render free tier doesn't include Kafka)
+   - Swagger disabled in production
+   - Logging level INFO (no DEBUG noise)
+   - `flyway.clean-disabled: true` (never wipe prod data)
+
+2. **Conditional Kafka beans** — Added `@ConditionalOnBean(KafkaTemplate.class)` to `TicketEventKafkaPublisher` and `@ConditionalOnProperty` to `TriageEventConsumer` so the app starts cleanly when Kafka is not configured.
+
+3. **`render.yaml`** — Render Blueprint (Infrastructure as Code) defining the web service, Docker runtime, health check path, and all required env vars.
+
+4. **`README.md`** — Complete rewrite with CI badge, tech stack table, quick start, API docs, architecture summary, and deployment instructions.
+
+**Files changed:**
+- `nexus-app/src/main/resources/application-prod.yml` — **[NEW]**
+- `nexus-app/src/main/java/com/nexus/ticket/infrastructure/messaging/TicketEventKafkaPublisher.java` — added `@ConditionalOnBean`
+- `nexus-app/src/main/java/com/nexus/ticket/infrastructure/messaging/TriageEventConsumer.java` — added `@ConditionalOnProperty`
+- `render.yaml` — **[NEW]** Render Blueprint
+- `README.md` — **[REWRITE]** Full README with CI badge

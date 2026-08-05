@@ -4,6 +4,7 @@ import com.nexus.ticket.domain.event.TicketCreatedEvent;
 import com.nexus.ticket.domain.event.TicketStatusChangedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.event.EventListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
@@ -20,6 +21,7 @@ import org.springframework.stereotype.Component;
  * (e.g., CREATED always arrives before STATUS_CHANGED for that ticket).
  */
 @Component
+@ConditionalOnBean(KafkaTemplate.class)
 public class TicketEventKafkaPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(TicketEventKafkaPublisher.class);
