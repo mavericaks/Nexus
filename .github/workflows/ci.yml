@@ -30,7 +30,9 @@ jobs:
           distribution: 'temurin'
           cache: maven
       - name: Compile (lint check)
-        run: ./mvnw compile --no-transfer-progress -B
+        run: |
+          chmod +x ./mvnw
+          ./mvnw compile --no-transfer-progress -B
 
   # ── Step 2: Secret Scan ─────────────────────────────────────
   secret-scan:
@@ -74,6 +76,7 @@ jobs:
           cache: maven
       - name: OWASP Dependency Check
         run: |
+          chmod +x ./mvnw
           ./mvnw org.owasp:dependency-check-maven:check \
             --no-transfer-progress -B \
             -DfailBuildOnCVSS=9 \
@@ -96,7 +99,9 @@ jobs:
           distribution: 'temurin'
           cache: maven
       - name: Run all tests (Testcontainers for Postgres + Kafka)
-        run: ./mvnw verify --no-transfer-progress -B
+        run: |
+          chmod +x ./mvnw
+          ./mvnw verify --no-transfer-progress -B
         env:
           # Tests use Testcontainers (auto-managed) — no external services needed.
           # AI services are mocked in tests — no real Groq/Gemini calls.
