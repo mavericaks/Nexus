@@ -19,7 +19,6 @@ END
 $$;
 
 -- ─── 2. Grant data-level permissions (CRUD, not DDL) ────────────────
-GRANT CONNECT ON DATABASE nexus TO nexus_app;
 GRANT USAGE ON SCHEMA public TO nexus_app;
 
 -- CRUD on all existing tables (includes tenants, tickets, flyway_schema_history)
