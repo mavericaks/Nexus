@@ -2,6 +2,9 @@
 # Activated with: --spring.profiles.active=prod
 # All sensitive values come from environment variables — NEVER hardcoded.
 
+server:
+  forward-headers-strategy: framework
+
 spring:
   # ─── Datasource — Neon Postgres ──────────────────────────────────
   # Uses the DATABASE_URL env var set in Render's dashboard.
