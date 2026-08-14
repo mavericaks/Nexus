@@ -35,3 +35,5 @@ services:
         sync: false
       - key: REDIS_SSL
         value: "true"
+      - key: FRONTEND_URL
+        sync: false  # Set to production frontend URL (e.g., https://nexus.vercel.app)

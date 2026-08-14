@@ -69,6 +69,8 @@ nexus:
   rate-limit:
     requests-per-window: 60
     window-seconds: 60
+  cors:
+    allowed-origins: ${FRONTEND_URL:http://localhost:3000}
 
 # ─── Spring AI — Groq ────────────────────────────────────────────────
 spring.ai:
