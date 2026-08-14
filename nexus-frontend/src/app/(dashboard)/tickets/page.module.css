@@ -1,0 +1,209 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.pageHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.subtitle {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-top: var(--space-1);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.filterActive {
+  border-color: var(--accent-primary) !important;
+  color: var(--accent-primary-hover) !important;
+}
+
+.filterDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+}
+
+/* ─── Filter Bar ─────────────────────────────────────────────────── */
+.filterBar {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  align-items: center;
+}
+
+.filterBar select {
+  max-width: 200px;
+}
+
+/* ─── Table ──────────────────────────────────────────────────────── */
+.tableWrap {
+  overflow-x: auto;
+  padding: 0;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th {
+  text-align: left;
+  padding: var(--space-4) var(--space-5);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-glass);
+}
+
+.table td {
+  padding: var(--space-4) var(--space-5);
+  font-size: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  vertical-align: middle;
+}
+
+.row {
+  cursor: pointer;
+  transition: background var(--duration-fast);
+  position: relative;
+}
+
+.row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%) scaleY(0);
+  width: 2px;
+  height: 60%;
+  background: var(--accent-primary);
+  border-radius: 0 2px 2px 0;
+  transition: transform 0.2s var(--ease-smooth);
+}
+
+.row:hover::before {
+  transform: translateY(-50%) scaleY(1);
+}
+
+.subjectCell {
+  max-width: 400px;
+}
+
+.subject {
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+.category {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.empty {
+  color: var(--text-tertiary);
+}
+
+.timeCell {
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* ─── Skeleton ───────────────────────────────────────────────────── */
+.loadingRows {
+  padding: var(--space-4);
+}
+
+.skeletonRow {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.skLine {
+  height: 14px;
+  flex: 1;
+}
+
+.skBadge {
+  width: 70px;
+  height: 22px;
+  border-radius: var(--radius-full);
+}
+
+.skDate {
+  width: 60px;
+  height: 14px;
+}
+
+/* ─── Empty State ────────────────────────────────────────────────── */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-16);
+  color: var(--text-tertiary);
+}
+
+.emptyState p {
+  font-size: 16px;
+}
+
+/* ─── Pagination ─────────────────────────────────────────────────── */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+}
+
+.pageInfo {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Responsive ─────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .pageHeader {
+    flex-direction: column;
+  }
+
+  .filterBar {
+    flex-direction: column;
+  }
+
+  .filterBar select {
+    max-width: 100%;
+  }
+
+  .table th:nth-child(4),
+  .table td:nth-child(4) {
+    display: none;
+  }
+}

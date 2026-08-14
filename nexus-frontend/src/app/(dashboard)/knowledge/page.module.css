@@ -1,0 +1,81 @@
+.page { display: flex; flex-direction: column; gap: var(--space-6); }
+.pageHeader { display: flex; align-items: flex-start; justify-content: space-between; }
+.subtitle { font-size: 14px; color: var(--text-secondary); margin-top: var(--space-1); }
+
+.addForm {
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  overflow: hidden;
+}
+.addForm button { align-self: flex-end; }
+
+.searchBar {
+  display: flex;
+  gap: var(--space-3);
+}
+.searchInput {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--duration-fast);
+  color: var(--text-secondary);
+}
+.searchInput:focus-within { border-color: var(--accent-primary); }
+.searchField {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 15px;
+}
+.searchField::placeholder { color: var(--text-tertiary); }
+
+.results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--space-4);
+}
+.articleCard {
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  cursor: default;
+}
+.articleIcon {
+  width: 40px; height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm);
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--accent-primary-hover);
+}
+.articleTitle { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+.articleContent {
+  font-size: 14px; color: var(--text-secondary); line-height: 1.7;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+.emptyState {
+  grid-column: 1 / -1;
+  display: flex; flex-direction: column; align-items: center;
+  gap: var(--space-4); padding: var(--space-16);
+  color: var(--text-tertiary);
+}
+.emptyState p { font-size: 16px; }
+
+.placeholder {
+  display: flex; flex-direction: column; align-items: center;
+  gap: var(--space-4); padding: var(--space-16);
+  color: var(--text-tertiary); text-align: center;
+}
+.placeholder p { font-size: 16px; max-width: 400px; }
+.hint { font-size: 13px; color: var(--text-tertiary); }
