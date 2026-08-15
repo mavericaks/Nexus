@@ -15,5 +15,5 @@ import java.util.UUID;
 @Repository
 public interface TicketEventRepository extends JpaRepository<TicketEventEntity, UUID> {
 
-    List<TicketEventEntity> findByTicketIdOrderByCreatedAtAsc(UUID ticketId);
+    List<TicketEventEntity> findByTicket_IdOrderByCreatedAtAsc(UUID ticketId);
 }

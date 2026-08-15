@@ -43,7 +43,7 @@ public class TicketEventService {
      */
     @Transactional(readOnly = true)
     public List<TicketEventResponse> getEventsForTicket(UUID ticketId) {
-        return ticketEventRepository.findByTicketIdOrderByCreatedAtAsc(ticketId)
+        return ticketEventRepository.findByTicket_IdOrderByCreatedAtAsc(ticketId)
                 .stream()
                 .map(e -> new TicketEventResponse(
                         e.getId(),

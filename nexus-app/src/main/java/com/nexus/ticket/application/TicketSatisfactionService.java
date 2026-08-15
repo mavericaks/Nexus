@@ -41,7 +41,7 @@ public class TicketSatisfactionService {
                 .orElseThrow(() -> new TicketNotFoundException(ticketId));
 
         // Check for duplicate rating
-        Optional<TicketSatisfactionEntity> existing = satisfactionRepository.findByTicketId(ticketId);
+        Optional<TicketSatisfactionEntity> existing = satisfactionRepository.findByTicket_Id(ticketId);
         if (existing.isPresent()) {
             throw new IllegalStateException("Ticket already has a satisfaction rating.");
         }
@@ -58,7 +58,7 @@ public class TicketSatisfactionService {
      */
     @Transactional(readOnly = true)
     public Optional<SatisfactionResponse> getRating(UUID ticketId) {
-        return satisfactionRepository.findByTicketId(ticketId).map(this::toResponse);
+        return satisfactionRepository.findByTicket_Id(ticketId).map(this::toResponse);
     }
 
     /**

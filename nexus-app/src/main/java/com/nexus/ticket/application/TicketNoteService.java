@@ -48,7 +48,7 @@ public class TicketNoteService {
      */
     @Transactional(readOnly = true)
     public List<NoteResponse> getNotesForTicket(UUID ticketId) {
-        return noteRepository.findByTicketIdOrderByCreatedAtAsc(ticketId)
+        return noteRepository.findByTicket_IdOrderByCreatedAtAsc(ticketId)
                 .stream()
                 .map(this::toResponse)
                 .toList();
