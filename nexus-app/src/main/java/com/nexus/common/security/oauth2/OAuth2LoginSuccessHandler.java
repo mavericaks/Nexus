@@ -1,12 +1,12 @@
 package com.nexus.common.security.oauth2;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nexus.common.security.jwt.JwtTokenProvider;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
@@ -14,13 +14,14 @@ import org.springframework.stereotype.Component;
 
 import javax.sql.DataSource;
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -34,11 +35,11 @@ import java.util.UUID;
  *       email, name, picture, etc.</li>
  *   <li>We look up the Google email in our {@code users} table:
  *       <ul>
- *         <li>If found → issue our JWT with the existing user's tenant/roles</li>
- *         <li>If not found → return 403 (account must exist; admins pre-create users)</li>
+ *         <li>If found → issue our JWT and redirect to the frontend with ?token=...</li>
+ *         <li>If not found → redirect to the frontend with ?error=...</li>
  *       </ul>
  *   </li>
- *   <li>Return the JWT as JSON — the frontend stores it for subsequent API calls</li>
+ *   <li>The frontend reads the token from the URL, stores it, and cleans the URL</li>
  * </ol>
  *
  * <p><b>Why not auto-create users on first Google login?</b></p>
@@ -51,10 +52,10 @@ import java.util.UUID;
 public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 
     private static final Logger log = LoggerFactory.getLogger(OAuth2LoginSuccessHandler.class);
-    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     private final JwtTokenProvider jwtTokenProvider;
     private final DataSource authDataSource;
+    private final String frontendUrl;
 
     /**
      * SQL to find an existing user by email + load their roles.
@@ -68,9 +69,11 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             """;
 
     public OAuth2LoginSuccessHandler(JwtTokenProvider jwtTokenProvider,
-                                     @Qualifier("authDataSource") DataSource authDataSource) {
+                                     @Qualifier("authDataSource") DataSource authDataSource,
+                                     @Value("${nexus.frontend-url:http://localhost:3000}") String frontendUrl) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.authDataSource = authDataSource;
+        this.frontendUrl = frontendUrl;
     }
 
     @Override
@@ -87,28 +90,21 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             UserLookupResult user = findUserByEmail(googleEmail);
 
             if (user == null) {
-                // User doesn't exist in our system — reject
+                // User doesn't exist in our system — redirect with error
                 log.warn("OAuth2 login rejected: no Nexus account for email={}", googleEmail);
-                response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-                response.setContentType("application/json");
-                response.getWriter().write(objectMapper.writeValueAsString(Map.of(
-                        "status", 403,
-                        "error", "Forbidden",
-                        "message", "No Nexus account linked to " + googleEmail
-                                + ". Ask your tenant admin to create your account first."
-                )));
+                String errorMsg = URLEncoder.encode(
+                        "No Nexus account linked to " + googleEmail
+                                + ". Ask your tenant admin to create your account first.",
+                        StandardCharsets.UTF_8);
+                response.sendRedirect(frontendUrl + "?error=" + errorMsg);
                 return;
             }
 
             if (!user.enabled()) {
                 log.warn("OAuth2 login rejected: account disabled for email={}", googleEmail);
-                response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-                response.setContentType("application/json");
-                response.getWriter().write(objectMapper.writeValueAsString(Map.of(
-                        "status", 403,
-                        "error", "Forbidden",
-                        "message", "Your account has been disabled."
-                )));
+                String errorMsg = URLEncoder.encode(
+                        "Your account has been disabled.", StandardCharsets.UTF_8);
+                response.sendRedirect(frontendUrl + "?error=" + errorMsg);
                 return;
             }
 
@@ -119,25 +115,14 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             log.info("OAuth2 login success: email={}, tenant={}, roles={}",
                     user.email(), user.tenantId(), user.roles());
 
-            response.setContentType("application/json");
-            response.getWriter().write(objectMapper.writeValueAsString(Map.of(
-                    "token", token,
-                    "email", user.email(),
-                    "name", googleName != null ? googleName : user.email(),
-                    "tenantId", user.tenantId().toString(),
-                    "roles", user.roles(),
-                    "provider", "google"
-            )));
+            // Redirect to frontend with token in URL
+            response.sendRedirect(frontendUrl + "?token=" + token);
 
         } catch (SQLException e) {
             log.error("OAuth2 login failed: database error for email={}", googleEmail, e);
-            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-            response.setContentType("application/json");
-            response.getWriter().write(objectMapper.writeValueAsString(Map.of(
-                    "status", 500,
-                    "error", "Internal Server Error",
-                    "message", "Authentication failed. Please try again."
-            )));
+            String errorMsg = URLEncoder.encode(
+                    "Authentication failed. Please try again.", StandardCharsets.UTF_8);
+            response.sendRedirect(frontendUrl + "?error=" + errorMsg);
         }
     }
 

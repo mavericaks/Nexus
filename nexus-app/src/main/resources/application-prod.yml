@@ -71,6 +71,7 @@ nexus:
     window-seconds: 60
   cors:
     allowed-origins: ${FRONTEND_URL:http://localhost:3000}
+  frontend-url: ${FRONTEND_URL:http://localhost:3000}
 
 # ─── Spring AI — Groq ────────────────────────────────────────────────
 spring.ai:
