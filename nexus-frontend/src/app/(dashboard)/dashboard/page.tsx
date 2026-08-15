@@ -76,7 +76,7 @@ export default function DashboardPage() {
       // Recent tickets
       setRecentTickets(tickets.slice(0, 5));
     } catch (err) {
-      console.error('Failed to load dashboard:', err);
+      console.error('Failed to load dashboard:', err instanceof Error ? err : JSON.stringify(err));
     } finally {
       setLoading(false);
     }
