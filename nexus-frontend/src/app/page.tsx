@@ -8,7 +8,7 @@ import { Zap, Shield, Brain, ChevronDown } from 'lucide-react';
 import styles from './page.module.css';
 
 export default function LandingPage() {
-  const { isAuthenticated, isLoading, login } = useAuth();
+  const { isAuthenticated, isLoading, login, authError, clearError } = useAuth();
   const router = useRouter();
   const [showFeatures, setShowFeatures] = useState(false);
 
@@ -95,6 +95,18 @@ export default function LandingPage() {
         >
           Intelligent ticket triage. Instant knowledge retrieval. Enterprise-grade security.
         </motion.p>
+
+        {authError && (
+          <motion.div
+            className={styles.errorAlert}
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            onClick={clearError}
+          >
+            <p>{authError}</p>
+            <span className={styles.errorDismiss}>✕</span>
+          </motion.div>
+        )}
 
         <motion.button
           className={styles.loginBtn}

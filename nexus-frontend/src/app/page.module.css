@@ -74,6 +74,36 @@
   line-height: 1.6;
 }
 
+.errorAlert {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-sm);
+  color: #fca5a5;
+  font-size: 14px;
+  max-width: 480px;
+  margin-bottom: var(--space-6);
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.errorAlert:hover {
+  opacity: 0.8;
+}
+
+.errorAlert p {
+  flex: 1;
+  line-height: 1.5;
+}
+
+.errorDismiss {
+  font-size: 16px;
+  opacity: 0.6;
+}
+
 .loginBtn {
   display: flex;
   align-items: center;
