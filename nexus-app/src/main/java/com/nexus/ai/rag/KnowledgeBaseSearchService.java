@@ -56,7 +56,13 @@ public class KnowledgeBaseSearchService {
         log.info("Searching knowledge base for: '{}'", truncate(query, 100));
 
         // Step 1: Convert query to embedding vector
-        List<Float> queryEmbedding = embeddingService.embed(query);
+        List<Float> queryEmbedding;
+        try {
+            queryEmbedding = embeddingService.embed(query);
+        } catch (com.nexus.ai.embedding.EmbeddingException e) {
+            log.warn("Embedding API failed during search, skipping KB retrieval: {}", e.getMessage());
+            return java.util.Collections.emptyList();
+        }
 
         // Step 2: Format as pgvector string (e.g., "[0.1,0.2,0.3,...]")
         String vectorString = toPgVectorString(queryEmbedding);
