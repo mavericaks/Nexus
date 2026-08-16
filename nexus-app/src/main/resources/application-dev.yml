@@ -83,7 +83,7 @@ nexus:
     # to bypass RLS. The app role (nexus_app) has RLS enforced, but
     # during login we don't know the tenant yet.
     auth-datasource:
-      jdbc-url: jdbc:postgresql://localhost:15432/nexus
+      url: jdbc:postgresql://localhost:15432/nexus
       username: nexus
       password: nexus_local
   # ─── AI Triage configuration ──────────────────────────────────────

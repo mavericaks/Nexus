@@ -23,12 +23,19 @@ import javax.sql.DataSource;
  * {@link NexusUserDetailsService} for the login query — nothing else
  * should use it.</p>
  */
+import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
+
 @Configuration
 public class AuthDataSourceConfig {
 
-    @Bean("authDataSource")
+    @Bean
     @ConfigurationProperties(prefix = "nexus.security.auth-datasource")
+    public DataSourceProperties authDataSourceProperties() {
+        return new DataSourceProperties();
+    }
+
+    @Bean("authDataSource")
     public DataSource authDataSource() {
-        return DataSourceBuilder.create().build();
+        return authDataSourceProperties().initializeDataSourceBuilder().build();
     }
 }

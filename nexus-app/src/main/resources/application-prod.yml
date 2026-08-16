@@ -59,7 +59,7 @@ nexus:
     # Auth datasource — same as main datasource in prod (no separate RLS bypass needed
     # since we use the owner role for the managed database).
     auth-datasource:
-      jdbc-url: ${DATABASE_URL}
+      url: ${DATABASE_URL}
       username: ${DB_USERNAME:}
       password: ${DB_PASSWORD:}
   ai:
