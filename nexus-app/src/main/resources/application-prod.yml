@@ -60,8 +60,7 @@ nexus:
     # since we use the owner role for the managed database).
     auth-datasource:
       url: ${DATABASE_URL}
-      username: ${DB_USERNAME:}
-      password: ${DB_PASSWORD:}
+      driver-class-name: org.postgresql.Driver
   ai:
     confidence-threshold: 0.75
     auto-resolve-enabled: true
