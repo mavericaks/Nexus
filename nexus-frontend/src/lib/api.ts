@@ -223,7 +223,7 @@ class ApiClient {
 
   async triageTicket(tenantId: string, ticketId: string): Promise<TriageResult> {
     return this.request<TriageResult>(
-      `/api/v1/tenants/${tenantId}/triage/${ticketId}`,
+      `/api/v1/tenants/${tenantId}/tickets/${ticketId}/triage`,
       { method: 'POST' }
     );
   }
