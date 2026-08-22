@@ -64,11 +64,12 @@ export interface Notification {
 }
 
 export interface TriageResult {
-  ticketId: string;
-  suggestedCategory: string;
-  suggestedPriority: string;
+  category: string;
+  priority: string;
+  suggestedReply: string;
+  reasoning: string;
   confidenceScore: number;
-  suggestedResponse: string;
+  autoResolvable: boolean;
 }
 
 export interface KnowledgeArticle {
@@ -208,7 +209,7 @@ class ApiClient {
   ): Promise<Ticket> {
     return this.request<Ticket>(
       `/api/v1/tenants/${tenantId}/tickets/${ticketId}/transition`,
-      { method: 'POST', body: JSON.stringify(data) }
+      { method: 'PATCH', body: JSON.stringify(data) }
     );
   }
 

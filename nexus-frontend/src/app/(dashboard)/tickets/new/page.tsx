@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuth } from '@/context/AuthContext';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
@@ -29,8 +29,8 @@ export default function NewTicketPage() {
         description: description.trim(),
       });
       router.push(`/tickets/${ticket.id}`);
-    } catch (err: any) {
-      setError(err.message || 'Failed to create ticket');
+    } catch (err: unknown) {
+      setError((err as ApiError)?.message || 'Failed to create ticket');
     } finally {
       setSubmitting(false);
     }

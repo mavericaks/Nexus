@@ -29,8 +29,11 @@ import java.util.Map;
  * <p>Values are serialized as JSON (not Java serialization) so they're
  * human-readable in Redis and not coupled to class versions.
  */
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+
 @Configuration
 @EnableCaching
+@ConditionalOnBean(RedisConnectionFactory.class)
 public class CacheConfig {
 
     private static final Logger log = LoggerFactory.getLogger(CacheConfig.class);

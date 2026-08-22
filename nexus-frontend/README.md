@@ -1,36 +1,85 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Nexus Frontend — Next.js 15 Support Workspace
 
-## Getting Started
+<div align="center">
 
-First, run the development server:
+[![Next.js](https://img.shields.io/badge/Next.js-15-black?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Framer Motion](https://img.shields.io/badge/Framer_Motion-13-black?style=for-the-badge&logo=framer&logoColor=blue)](https://www.framer.com/motion/)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+<p align="center">
+  <strong>A high-performance, dark glassmorphic customer support workspace featuring live AI triage animations, interactive command palette navigation (⌘K), and optimistic state management.</strong>
+</p>
+
+</div>
+
+---
+
+## 🎨 Design System & Highlights
+
+- **Custom Dark Glassmorphic Design System**: Built with modern CSS custom properties (design tokens), backdrop blurs, luminous borders, and subtle glow effects without external heavyweight UI libraries.
+- **Global Command Palette (`⌘K` / `Ctrl+K`)**: Instant keyboard navigation across tickets, knowledge base articles, team rosters, and real-time role-switching.
+- **Live AI Triage Simulation**: Animated multi-stage scanning visualization (Analyzing Intent $\rightarrow$ Querying `pgvector` $\rightarrow$ LLM Synthesis $\rightarrow$ Confidence Derivation).
+- **Optimistic State Machine Transitions**: Immediate UI feedback for ticket progressions with automatic rollback handling.
+- **Modular Feature Architecture**: 18 specialized components partitioned cleanly into `components/features/`, `components/layout/`, and `components/ui/`.
+
+---
+
+## 📂 Component & Directory Structure
+
+```
+nexus-frontend/src/
+├── app/
+│   ├── (dashboard)/
+│   │   ├── dashboard/page.tsx       # Live KPI analytics, ticket distribution, recent activity
+│   │   ├── tickets/page.tsx         # Filterable ticket queue with search, category & status pills
+│   │   ├── tickets/new/page.tsx     # Ticket submission wizard
+│   │   ├── tickets/[id]/page.tsx    # Interactive ticket detail & triage workspace
+│   │   ├── knowledge/page.tsx       # Semantic vector search tester & KB article management
+│   │   ├── notifications/page.tsx   # User notification inbox with read/unread toggles
+│   │   ├── settings/page.tsx        # Canned response templates & preferences
+│   │   ├── team/page.tsx            # Multi-tenant user roster & RBAC assignments
+│   │   └── layout.tsx               # Global dashboard shell (Sidebar, Header, CommandPalette)
+│   ├── globals.css                  # Design tokens, glassmorphism utilities & animations
+│   └── page.tsx                     # Authentication portal & mock tenant selector
+├── components/
+│   ├── features/tickets/            # TicketTable, TriagePanel, Timeline, NotesSection, TicketFilters
+│   ├── layout/                      # Sidebar, Header, CommandPalette (⌘K)
+│   └── ui/                          # Badge, Button, Card, EmptyState, Pagination, Skeleton
+├── context/
+│   └── AuthContext.tsx              # JWT token lifecycle, tenant switching, role permissions
+└── lib/
+    ├── api.ts                       # Typed API client covering all backend endpoints
+    └── auth.ts                      # JWT decoding & localStorage token persistence
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 🚀 Getting Started
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 1. Install Dependencies
+```bash
+npm install
+```
 
-## Learn More
+### 2. Configure Environment
+Create a `.env.local` file (optional if using default `http://localhost:8080`):
+```properties
+NEXT_PUBLIC_API_URL=http://localhost:8080
+```
 
-To learn more about Next.js, take a look at the following resources:
+### 3. Run Development Server
+```bash
+npm run dev
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## 🛠️ Scripts
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `npm run dev` — Starts Next.js development server with hot-reload
+- `npm run build` — Generates optimized production build
+- `npm run start` — Boots production server
+- `npm run lint` — Runs ESLint checks

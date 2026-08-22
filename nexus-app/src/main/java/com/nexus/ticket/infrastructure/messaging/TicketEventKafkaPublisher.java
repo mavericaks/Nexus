@@ -5,9 +5,10 @@ import com.nexus.ticket.domain.event.TicketStatusChangedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.context.event.EventListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionalEventListener;
+import org.springframework.transaction.event.TransactionPhase;
 
 /**
  * Bridges Spring {@code ApplicationEvent}s to Kafka topics.
@@ -19,6 +20,16 @@ import org.springframework.stereotype.Component;
  * <p>The Kafka message key is the {@code ticketId} — this ensures all events
  * for the same ticket land on the same partition, preserving ordering
  * (e.g., CREATED always arrives before STATUS_CHANGED for that ticket).
+ *
+ * <p><b>Transactional safety:</b> Uses {@code @TransactionalEventListener(phase = AFTER_COMMIT)}
+ * so that Kafka messages are only sent after the database transaction commits
+ * successfully. If the transaction rolls back, no event is published — preventing
+ * phantom events in Kafka that reference data that doesn't exist in the database.
+ *
+ * <p><b>Known limitation:</b> {@code AFTER_COMMIT} does NOT guarantee delivery.
+ * If the application crashes after DB commit but before the Kafka send completes,
+ * the event is lost. For guaranteed exactly-once delivery, an Outbox pattern
+ * would be required — that is intentionally deferred to a future phase.
  */
 @Component
 @ConditionalOnBean(KafkaTemplate.class)
@@ -32,7 +43,7 @@ public class TicketEventKafkaPublisher {
         this.kafkaTemplate = kafkaTemplate;
     }
 
-    @EventListener
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onTicketCreated(TicketCreatedEvent event) {
         log.info("Publishing TicketCreatedEvent to Kafka: ticketId={}, tenant={}",
                 event.ticketId(), event.tenantId());
@@ -44,7 +55,7 @@ public class TicketEventKafkaPublisher {
         );
     }
 
-    @EventListener
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onTicketStatusChanged(TicketStatusChangedEvent event) {
         log.info("Publishing TicketStatusChangedEvent to Kafka: ticketId={}, {} -> {}",
                 event.ticketId(), event.oldStatus(), event.newStatus());

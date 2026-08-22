@@ -14,6 +14,7 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 
@@ -65,9 +66,20 @@ public class TenantContextFilter implements Filter {
                 String urlTenantId = extractTenantIdFromUrl(httpRequest.getRequestURI());
                 String jwtTenantId = extractTenantIdFromJwt();
 
-                if (jwtTenantId != null && urlTenantId != null) {
-                    // Both present — they MUST match (cross-tenant attack prevention)
-                    if (!jwtTenantId.equals(urlTenantId)) {
+                Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+                boolean isAuthenticated = auth != null && auth.isAuthenticated() &&
+                        !(auth instanceof AnonymousAuthenticationToken);
+
+                if (isAuthenticated) {
+                    if (jwtTenantId == null) {
+                        log.error("Authenticated user has no valid tenantId claim in JWT.");
+                        ((HttpServletResponse) response).sendError(
+                                HttpServletResponse.SC_FORBIDDEN,
+                                "Invalid token structure: missing tenant information.");
+                        return;
+                    }
+                    
+                    if (urlTenantId != null && !jwtTenantId.equals(urlTenantId)) {
                         log.warn("Cross-tenant access attempt: JWT tenant={}, URL tenant={}",
                                 jwtTenantId, urlTenantId);
                         ((HttpServletResponse) response).sendError(
@@ -75,20 +87,17 @@ public class TenantContextFilter implements Filter {
                                 "Tenant mismatch: your account belongs to a different tenant.");
                         return;
                     }
-                    TenantContext.setTenantId(jwtTenantId);
-                    MDC.put("tenantId", jwtTenantId);
-                    log.debug("Tenant context set from JWT + URL: {}", jwtTenantId);
-                } else if (jwtTenantId != null) {
-                    // JWT only (e.g., endpoints without tenantId in URL)
+                    
                     TenantContext.setTenantId(jwtTenantId);
                     MDC.put("tenantId", jwtTenantId);
                     log.debug("Tenant context set from JWT: {}", jwtTenantId);
-                } else if (urlTenantId != null) {
-                    // URL only (e.g., unauthenticated endpoints — shouldn't happen
-                    // after Phase 3, but kept for backward compatibility)
-                    TenantContext.setTenantId(urlTenantId);
-                    MDC.put("tenantId", urlTenantId);
-                    log.debug("Tenant context set from URL: {}", urlTenantId);
+                } else {
+                    // Not authenticated. Only allow URL fallback if it's a public endpoint.
+                    if (urlTenantId != null) {
+                        TenantContext.setTenantId(urlTenantId);
+                        MDC.put("tenantId", urlTenantId);
+                        log.debug("Tenant context set from URL (unauthenticated): {}", urlTenantId);
+                    }
                 }
             }
             chain.doFilter(request, response);

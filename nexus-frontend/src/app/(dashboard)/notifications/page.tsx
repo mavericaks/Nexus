@@ -3,7 +3,7 @@
 import { useAuth } from '@/context/AuthContext';
 import { api, Notification } from '@/lib/api';
 import { timeAgo } from '@/lib/utils';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Bell, CheckCheck, Ticket, Brain, AlertTriangle } from 'lucide-react';
@@ -17,16 +17,11 @@ const TYPE_ICONS: Record<string, React.ReactNode> = {
 };
 
 export default function NotificationsPage() {
-  const { user } = useAuth();
   const router = useRouter();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadNotifications();
-  }, []);
-
-  async function loadNotifications() {
+  const loadNotifications = useCallback(async () => {
     try {
       const data = await api.getNotifications();
       setNotifications(data);
@@ -35,7 +30,11 @@ export default function NotificationsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    loadNotifications();
+  }, [loadNotifications]);
 
   async function markRead(id: string) {
     await api.markNotificationRead(id);
@@ -86,6 +85,16 @@ export default function NotificationsPage() {
                   if (!n.read) markRead(n.id);
                   if (n.referenceId) router.push(`/tickets/${n.referenceId}`);
                 }}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (!n.read) markRead(n.id);
+                    if (n.referenceId) router.push(`/tickets/${n.referenceId}`);
+                  }
+                }}
+                aria-label={`${n.read ? '' : 'Unread: '}${n.title}`}
               >
                 <div className={styles.iconWrap}>
                   {TYPE_ICONS[n.type] || <Bell size={16} />}

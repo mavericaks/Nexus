@@ -24,36 +24,30 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [authError, setAuthError] = useState<string | null>(null);
-
-  // Check for JWT on mount and when URL changes (OAuth callback)
-  useEffect(() => {
-    // Check URL for token or error from OAuth redirect
+  // Read OAuth redirect params during initialization (not in effect)
+  const [user, setUser] = useState<User | null>(() => {
+    if (typeof window === 'undefined') return null;
     const urlParams = new URLSearchParams(window.location.search);
     const tokenFromUrl = urlParams.get('token');
-    const errorFromUrl = urlParams.get('error');
-
     if (tokenFromUrl) {
       setToken(tokenFromUrl);
-      // Clean URL
       window.history.replaceState({}, '', window.location.pathname);
     }
+    return getUserFromToken();
+  });
 
+  const isLoading = false;
+
+  const [authError, setAuthError] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const urlParams = new URLSearchParams(window.location.search);
+    const errorFromUrl = urlParams.get('error');
     if (errorFromUrl) {
-      setAuthError(decodeURIComponent(errorFromUrl));
       window.history.replaceState({}, '', window.location.pathname);
+      return decodeURIComponent(errorFromUrl);
     }
-
-    // Try to get user from stored token
-    const storedUser = getUserFromToken();
-    if (storedUser) {
-      setUser(storedUser);
-    }
-
-    setIsLoading(false);
-  }, []);
+    return null;
+  });
 
   // Periodically check token expiry
   useEffect(() => {

@@ -47,11 +47,12 @@ public class KnowledgeBaseSearchService {
      * <p>Results are cached in Redis ({@link CacheConfig#RAG_SEARCH_CACHE})
      * with a 1-hour TTL. This avoids hitting the embedding API + pgvector
      * for identical support queries (common in high-volume tenants).
+     * The cache key includes the tenant ID to prevent cross-tenant leakage.
      *
      * @param query the search query (typically ticket subject + description)
      * @return list of retrieved articles, ordered by similarity (best first)
      */
-    @Cacheable(value = CacheConfig.RAG_SEARCH_CACHE, key = "#query")
+    @Cacheable(value = CacheConfig.RAG_SEARCH_CACHE, key = "T(com.nexus.common.multitenancy.TenantContext).getTenantId() + '-' + #query")
     public List<RetrievedArticle> search(String query) {
         log.info("Searching knowledge base for: '{}'", truncate(query, 100));
 

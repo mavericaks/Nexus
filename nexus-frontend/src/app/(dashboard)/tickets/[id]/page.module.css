@@ -10,6 +10,23 @@
   justify-content: space-between;
 }
 
+.actionError {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-danger-soft);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-sm);
+  color: var(--color-danger);
+  font-size: 13px;
+}
+
+.actionError p {
+  margin: 0;
+}
+
 .back {
   display: flex;
   align-items: center;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuth } from '@/context/AuthContext';
-import { api, KnowledgeArticle } from '@/lib/api';
+import { api, KnowledgeArticle, ApiError } from '@/lib/api';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Plus, BookOpen, X } from 'lucide-react';
@@ -17,6 +17,7 @@ export default function KnowledgePage() {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
 
   const canManage = user?.role === 'OWNER' || user?.role === 'ADMIN';
 
@@ -39,6 +40,7 @@ export default function KnowledgePage() {
     e.preventDefault();
     if (!user || !title.trim() || !content.trim()) return;
     setAdding(true);
+    setAddError(null);
     try {
       await api.addKnowledgeArticle(user.tenantId, {
         title: title.trim(),
@@ -47,8 +49,8 @@ export default function KnowledgePage() {
       setTitle('');
       setContent('');
       setShowAdd(false);
-    } catch (err: any) {
-      alert(err.message || 'Failed to add article');
+    } catch (err: unknown) {
+      setAddError((err as ApiError)?.message || 'Failed to add article');
     } finally {
       setAdding(false);
     }
@@ -101,6 +103,7 @@ export default function KnowledgePage() {
             >
               {adding ? 'Publishing...' : 'Publish Article'}
             </button>
+            {addError && <p className="input-error" role="alert">{addError}</p>}
           </motion.form>
         )}
       </AnimatePresence>

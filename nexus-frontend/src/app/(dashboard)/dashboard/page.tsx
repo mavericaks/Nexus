@@ -2,15 +2,15 @@
 
 import { useAuth } from '@/context/AuthContext';
 import { api, Ticket } from '@/lib/api';
-import { timeAgo, animateValue, formatEnum } from '@/lib/utils';
+import { timeAgo, animateValue } from '@/lib/utils';
 import { STATUS_CONFIG, PRIORITY_CONFIG } from '@/lib/constants';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Ticket as TicketIcon, TrendingUp, Brain, AlertTriangle,
-  CheckCircle2, Clock, ArrowUpRight, Activity
+  Ticket as TicketIcon,
+  Brain, CheckCircle2, Clock, ArrowUpRight, Activity
 } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import styles from './page.module.css';
 
 interface DashboardMetrics {
@@ -29,12 +29,7 @@ export default function DashboardPage() {
   const [statusData, setStatusData] = useState<{ name: string; value: number; color: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!user) return;
-    loadDashboard();
-  }, [user]);
-
-  async function loadDashboard() {
+  const loadDashboard = useCallback(async () => {
     if (!user) return;
     try {
       // Fetch tickets for stats
@@ -80,7 +75,12 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    loadDashboard();
+  }, [user, loadDashboard]);
 
   if (loading) {
     return (

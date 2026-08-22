@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/context/AuthContext';
 import { motion } from 'framer-motion';
-import { Settings as SettingsIcon, Globe, Key, Bell, Palette } from 'lucide-react';
+import { Globe, Key, Bell, Palette } from 'lucide-react';
 import styles from './page.module.css';
 
 export default function SettingsPage() {
@@ -56,10 +56,10 @@ export default function SettingsPage() {
           transition={{ delay: 0.2 }}
         >
           <div className={styles.cardIcon}><Bell size={20} /></div>
-          <h3 className={styles.cardTitle}>Notifications</h3>
+          <h3 className={styles.cardTitle}>Notifications <span className={styles.comingSoon}>Coming soon</span></h3>
           <div className={styles.settingRow}>
             <span className={styles.settingLabel}>Email Digest</span>
-            <select className="input" style={{ maxWidth: 160 }}>
+            <select className="input" style={{ maxWidth: 160 }} disabled>
               <option value="OFF">Off</option>
               <option value="DAILY">Daily</option>
               <option value="WEEKLY">Weekly</option>
@@ -68,7 +68,7 @@ export default function SettingsPage() {
           <div className={styles.settingRow}>
             <span className={styles.settingLabel}>In-App Sounds</span>
             <label className={styles.toggle}>
-              <input type="checkbox" defaultChecked />
+              <input type="checkbox" defaultChecked disabled />
               <span className={styles.toggleSlider} />
             </label>
           </div>
@@ -81,10 +81,10 @@ export default function SettingsPage() {
           transition={{ delay: 0.3 }}
         >
           <div className={styles.cardIcon}><Palette size={20} /></div>
-          <h3 className={styles.cardTitle}>Appearance</h3>
+          <h3 className={styles.cardTitle}>Appearance <span className={styles.comingSoon}>Coming soon</span></h3>
           <div className={styles.settingRow}>
             <span className={styles.settingLabel}>Theme</span>
-            <select className="input" style={{ maxWidth: 160 }}>
+            <select className="input" style={{ maxWidth: 160 }} disabled>
               <option value="DARK">Dark (Obsidian)</option>
               <option value="SYSTEM">System</option>
             </select>
