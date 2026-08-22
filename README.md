@@ -105,29 +105,29 @@ Data isolation is enforced at the database kernel level using PostgreSQL Row-Lev
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Client as Web Client
+    actor Client as Web Client
     participant TCF as TenantContextFilter
-    participant TC as TenantContext (ThreadLocal)
+    participant TC as TenantContext
     participant DS as TenantAwareDataSource
-    participant PG as PostgreSQL 16 (RLS Engine)
+    participant PG as PostgreSQL (RLS Engine)
 
-    Client->>TCF: HTTP Request (Bearer JWT, URL: /api/v1/tenants/{tenantId}/tickets)
-    Note over TCF: Validates JWT signature, claims, and path tenantId matching
-    TCF->>TC: setTenantId(tenantId)
+    Client->>TCF: HTTP Request with Bearer JWT
+    Note over TCF: Validate JWT signature & verify tenant ID
+    TCF->>TC: TenantContext.setTenantId(tenantId)
     TCF->>TCF: MDC.put("tenantId", tenantId)
 
-    TCF->>DS: Execute JPA / JDBC Query
-    Note over DS: Intercepts setAutoCommit(false) at transaction boundary
-    DS->>PG: SET LOCAL app.tenant_id = '{tenantId}'
+    TCF->>DS: Execute JPA or JDBC Query
+    Note over DS: Intercept setAutoCommit(false)
+    DS->>PG: SET LOCAL app.tenant_id = tenantId
     DS->>PG: SELECT * FROM tickets WHERE status = 'NEW'
 
     rect rgb(35, 45, 65)
-        Note over PG: PostgreSQL RLS Policy Evaluates:<br/>USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+        Note over PG: PostgreSQL RLS Policy Evaluates:<br/>tenant_id = current_setting('app.tenant_id', true)
         PG-->>DS: Returns strictly tenant-isolated rows
     end
 
     DS-->>Client: HTTP 200 OK (Scoped Response)
-    Note over TCF,TC: finally { TenantContext.clear(); MDC.clear(); }
+    Note over TCF, TC: Context Cleanup: TenantContext.clear() and MDC.clear()
 ```
 
 ### Dual-DataSource Architecture (Authentication Isolation)
@@ -154,31 +154,31 @@ sequenceDiagram
     Agent->>RAG: search(subject + " " + description)
     
     rect rgb(20, 35, 45)
-        Note over RAG,Gemini: 1. Semantic Embedding & Vector Retrieval
+        Note over RAG, Gemini: 1. Semantic Embedding & Vector Retrieval
         RAG->>Gemini: text-embedding-004(queryText)
         Gemini-->>RAG: 768-dimensional float vector
-        RAG->>PG: SELECT *, (1 - (embedding <=> :vector)) AS similarity<br/>FROM knowledge_articles ORDER BY embedding <=> :vector LIMIT 3
-        PG-->>RAG: List<RetrievedArticle>
+        RAG->>PG: Vector Cosine Similarity Search (LIMIT 3)
+        PG-->>RAG: List of Relevant Retrieved Articles
     end
 
-    Agent->>Agent: Construct Structured Prompt (Context + Guidelines + Output JSON Schema)
+    Agent->>Agent: Construct Structured Prompt (Context + Output Schema)
     
     rect rgb(45, 25, 40)
-        Note over Agent,Groq: 2. Fault-Tolerant LLM Inference (Resilience4j)
+        Note over Agent, Groq: 2. Fault-Tolerant LLM Inference (Resilience4j)
         Agent->>Groq: ChatClient.call() [Llama 3.3 70B]
-        Groq-->>Agent: JSON: {category, priority, suggested_reply, reasoning}
+        Groq-->>Agent: Structured JSON (category, priority, reply, reasoning)
     end
 
     rect rgb(25, 45, 30)
-        Note over Agent,Calc: 3. Mathematical Confidence Derivation
+        Note over Agent, Calc: 3. Mathematical Confidence Derivation
         Agent->>Calc: calculate(articles, parseSuccess, category)
-        Note over Calc: Confidence = (0.50 * AvgSimilarity) + (0.25 * ParseValid) + (0.25 * CategoryAgreement)
-        Calc-->>Agent: Confidence Score (0.00 – 1.00)
+        Note over Calc: Confidence = 0.50*Sim + 0.25*Parse + 0.25*Agreement
+        Calc-->>Agent: Confidence Score (0.00 to 1.00)
     end
 
     Agent-->>TS: TriageResult (Category, Priority, Reply, Confidence)
 
-    alt Confidence >= 0.85 && AutoResolve Enabled
+    alt Confidence >= 0.85 and AutoResolve Enabled
         TS->>TS: Transition: NEW -> CLASSIFIED -> AI_DRAFTED -> AUTO_RESOLVED
     else Low Confidence or Escalation Condition
         TS->>TS: Transition: NEW -> CLASSIFIED -> AI_DRAFTED -> ESCALATED
@@ -194,24 +194,14 @@ The ticket lifecycle is governed by a **pure Java state transition engine** with
 ```mermaid
 stateDiagram-v2
     [*] --> NEW: Customer Submits Ticket
-    
-    NEW --> CLASSIFIED: AI / Agent Identifies Category
-    CLASSIFIED --> AI_DRAFTED: RAG Agent Generates Response
-    
-    state AI_DRAFTED {
-        [*] --> Evaluating
-        Evaluating --> Decision
-    }
-    
-    AI_DRAFTED --> AUTO_RESOLVED: Confidence >= 0.85 (High Certainty)
-    AI_DRAFTED --> ESCALATED: Confidence < 0.85 / Complex Issue
-    
-    ESCALATED --> IN_PROGRESS: Support Agent Claims Ticket
-    IN_PROGRESS --> RESOLVED: Agent Provides Solution
-    
-    AUTO_RESOLVED --> CLOSED: Retention / Customer Confirmed
-    RESOLVED --> CLOSED: Customer Confirmed Resolution
-    
+    NEW --> CLASSIFIED: Category Identified
+    CLASSIFIED --> AI_DRAFTED: RAG Response Generated
+    AI_DRAFTED --> AUTO_RESOLVED: High Confidence (>= 0.85)
+    AI_DRAFTED --> ESCALATED: Low Confidence (< 0.85)
+    ESCALATED --> IN_PROGRESS: Agent Claims Ticket
+    IN_PROGRESS --> RESOLVED: Solution Provided
+    AUTO_RESOLVED --> CLOSED: Retention Confirmed
+    RESOLVED --> CLOSED: Customer Confirmed
     CLOSED --> [*]
 ```
 

@@ -222,14 +222,15 @@ Nexus guarantees that tenant data never leaks across tenant boundaries through a
 
 ```mermaid
 sequenceDiagram
-    participant Client as HTTP Client
+    autonumber
+    actor Client as HTTP Client
     participant TCF as TenantContextFilter
-    participant TC as TenantContext (ThreadLocal)
+    participant TC as TenantContext
     participant SpringSec as Spring Security (JWT)
     participant DS as TenantAwareDataSource
     participant PG as PostgreSQL (RLS Engine)
 
-    Client->>TCF: HTTP Request (Bearer JWT, URL: /tenants/{tenantId}/tickets)
+    Client->>TCF: HTTP Request (Bearer JWT, URL: /tenants/tenantId/tickets)
     TCF->>SpringSec: Validate JWT & Claims
     SpringSec-->>TCF: JWT Claims (sub, userId, tenantId, roles)
     
@@ -239,20 +240,20 @@ sequenceDiagram
         alt Mismatch Detected
             TCF-->>Client: 403 Forbidden (Tenant Mismatch)
         else Verified
-            TCF->>TC: setTenantId(tenantId)
+            TCF->>TC: TenantContext.setTenantId(tenantId)
             TCF->>TCF: MDC.put("tenantId", tenantId)
         end
     end
 
     TCF->>DS: Execute Service / Repository Query
     DS->>DS: Intercept setAutoCommit(false)
-    DS->>PG: SET LOCAL app.tenant_id = '{tenantId}'
+    DS->>PG: SET LOCAL app.tenant_id = tenantId
     DS->>PG: SELECT * FROM tickets WHERE ...
-    Note over PG: RLS Policy filters: tenant_id = current_setting('app.tenant_id')
+    Note over PG: RLS Policy filters: tenant_id = app.tenant_id
     PG-->>DS: Only Tenant's Rows Returned
     DS-->>Client: HTTP 200 OK (Scoped Response)
 
-    Note over TCF,TC: finally { TenantContext.clear(); MDC.remove("tenantId"); }
+    Note over TCF, TC: Context Cleanup: TenantContext.clear() and MDC.remove("tenantId")
 ```
 
 ### Core Multitenancy Classes:
@@ -291,6 +292,7 @@ When an unauthenticated user logs in at `POST /api/v1/auth/login`, their tenant 
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant TS as TriageService
     participant Agent as TriageAgent
     participant RAG as KnowledgeBaseSearchService
@@ -303,31 +305,31 @@ sequenceDiagram
     Agent->>RAG: search(subject + " " + description)
     
     rect rgb(20, 30, 40)
-        Note over RAG,Gemini: RAG Vector Search & Cache
+        Note over RAG, Gemini: RAG Vector Search & Cache
         RAG->>Gemini: embed(queryText)
         Gemini-->>RAG: 768-dim float vector
-        RAG->>PG: SELECT *, (1 - (embedding <=> :vector)) AS similarity FROM knowledge_articles ORDER BY embedding <=> :vector LIMIT 3
-        PG-->>RAG: List<RetrievedArticle>
+        RAG->>PG: Vector Cosine Similarity Search (LIMIT 3)
+        PG-->>RAG: List of Retrieved Articles
     end
 
     RAG-->>Agent: Relevant Articles & Similarity Scores
     Agent->>Agent: Build Structured Prompt (System + User + KB Context)
     
     rect rgb(30, 20, 40)
-        Note over Agent,Groq: Resilience4j Circuit Breaker & Retry
+        Note over Agent, Groq: Resilience4j Circuit Breaker & Retry
         Agent->>Groq: Prompt Execution (ChatClient)
-        Groq-->>Agent: JSON Response {category, priority, suggested_reply, reasoning}
+        Groq-->>Agent: Structured JSON (category, priority, reply, reasoning)
     end
 
     Agent->>Calc: calculate(articles, parseSuccess, category)
-    Note over Calc: Confidence = (0.5 * Sim) + (0.25 * Parse) + (0.25 * CategoryAgreement)
-    Calc-->>Agent: Confidence Score (0.0 – 1.0)
+    Note over Calc: Confidence = 0.50*Sim + 0.25*Parse + 0.25*Agreement
+    Calc-->>Agent: Confidence Score (0.0 to 1.0)
     Agent-->>TS: TriageResult
 
     rect rgb(20, 40, 30)
         Note over TS: Autonomous State Machine Progression
         TS->>TS: NEW -> CLASSIFIED -> AI_DRAFTED
-        alt Confidence >= Threshold && AutoResolve Enabled
+        alt Confidence >= Threshold and AutoResolve Enabled
             TS->>TS: AI_DRAFTED -> AUTO_RESOLVED
         else Low Confidence / Escalation Needed
             TS->>TS: AI_DRAFTED -> ESCALATED
