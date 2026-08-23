@@ -70,6 +70,11 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/**").permitAll()
                         .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
+
+                        // Swagger UI / OpenAPI (Phase 2)
+                        .requestMatchers("/swagger-ui/**", "/swagger-ui.html",
+                                "/v3/api-docs/**").permitAll()
+
                         .requestMatchers("/error").permitAll()
 
                         // Everything else requires authentication

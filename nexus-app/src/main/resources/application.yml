@@ -86,3 +86,21 @@ resilience4j:
         # Exponential backoff: 500ms → 1s → 2s
         enableExponentialBackoff: true
         exponentialBackoffMultiplier: 2
+
+# ─── Demo Mode ────────────────────────────────────────────────────
+# When enabled, registers the /api/v1/auth/demo-login endpoint.
+# ONLY enable for portfolio demos — never in production.
+nexus:
+  demo:
+    enabled: ${DEMO_MODE:false}
+
+# ─── OpenAPI / Swagger UI ─────────────────────────────────────────
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    try-it-out-enabled: true
+    operations-sorter: method
+    tags-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+

@@ -8,7 +8,7 @@ import { Zap, Shield, Brain, ChevronDown } from 'lucide-react';
 import styles from './page.module.css';
 
 export default function LandingPage() {
-  const { isAuthenticated, isLoading, login, authError, clearError } = useAuth();
+  const { isAuthenticated, isLoading, login, demoLogin, isDemoLoading, authError, clearError } = useAuth();
   const router = useRouter();
   const [showFeatures, setShowFeatures] = useState(false);
 
@@ -125,6 +125,29 @@ export default function LandingPage() {
           </svg>
           Sign in with Google
         </motion.button>
+
+        <motion.div
+          className={styles.demoSection}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 1.6, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+        >
+          <motion.button
+            className={styles.demoBtn}
+            onClick={demoLogin}
+            disabled={isDemoLoading}
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.97 }}
+          >
+            {isDemoLoading ? (
+              <span className={styles.demoBtnLoader} />
+            ) : (
+              <Zap size={18} />
+            )}
+            {isDemoLoading ? 'Launching Demo...' : 'Try Live Demo'}
+          </motion.button>
+          <span className={styles.demoHint}>No signup required</span>
+        </motion.div>
 
         <motion.div
           className={styles.scrollHint}

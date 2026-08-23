@@ -1,12 +1,36 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, Sparkles, Loader2 } from 'lucide-react';
-import { api, Ticket, TriageResult, ApiError } from '@/lib/api';
+import { Brain, Sparkles, Loader2, Check, Search, Cpu, BarChart3, AlertCircle, BookOpen } from 'lucide-react';
+import { Ticket, TriageResult, ApiError } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { formatEnum } from '@/lib/utils';
 import { PRIORITY_CONFIG } from '@/lib/constants';
+import { API_BASE_URL } from '@/lib/constants';
+import { getToken } from '@/lib/auth';
 import { Button } from '@/components/ui/Button';
 import styles from '@/app/(dashboard)/tickets/[id]/page.module.css';
+
+interface KBArticle {
+  title: string;
+  similarity: string;
+}
+
+interface StageInfo {
+  id: string;
+  label: string;
+  icon: React.ReactNode;
+  status: 'pending' | 'active' | 'done' | 'error';
+  message?: string;
+  data?: KBArticle[] | Record<string, unknown> | null;
+}
+
+const PIPELINE_STAGES: { id: string; label: string; icon: React.ReactNode }[] = [
+  { id: 'KB_SEARCH', label: 'Knowledge Base Search', icon: <Search size={14} /> },
+  { id: 'KB_RESULTS', label: 'Articles Retrieved', icon: <BookOpen size={14} /> },
+  { id: 'LLM_CALL', label: 'AI Analysis', icon: <Brain size={14} /> },
+  { id: 'LLM_RESPONSE', label: 'Response Received', icon: <Cpu size={14} /> },
+  { id: 'CONFIDENCE', label: 'Confidence Scoring', icon: <BarChart3 size={14} /> },
+];
 
 export interface TriagePanelProps {
   ticket: Ticket;
@@ -18,38 +42,140 @@ export interface TriagePanelProps {
 export function TriagePanel({ ticket, initialResult, onTriageComplete, onError }: TriagePanelProps) {
   const { user } = useAuth();
   const [triaging, setTriaging] = useState(false);
-  const [triagePhase, setTriagePhase] = useState(0);
+  const [stages, setStages] = useState<StageInfo[]>([]);
   const [localTriageResult, setLocalTriageResult] = useState<TriageResult | null>(null);
+  const [streamComplete, setStreamComplete] = useState(false);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
   const displayResult = localTriageResult || initialResult;
-
   const canTriage = ['NEW'].includes(ticket.status);
 
-  async function handleTriage() {
+  const updateStage = useCallback((stageId: string, status: StageInfo['status'], message?: string, data?: StageInfo['data']) => {
+    setStages(prev => {
+      const existing = prev.find(s => s.id === stageId);
+      if (existing) {
+        return prev.map(s => s.id === stageId ? { ...s, status, message, data } : s);
+      }
+      const template = PIPELINE_STAGES.find(p => p.id === stageId);
+      if (!template) return prev;
+      return [...prev, { ...template, status, message, data }];
+    });
+  }, []);
+
+  function handleTriage() {
     if (!user || !ticket) return;
+
     setTriaging(true);
-    setTriagePhase(1);
+    setStreamComplete(false);
+    setLocalTriageResult(null);
 
-    const phase2 = setTimeout(() => setTriagePhase(2), 800);
-    const phase3 = setTimeout(() => setTriagePhase(3), 1800);
+    // Initialize all stages as pending
+    setStages(PIPELINE_STAGES.map(s => ({ ...s, status: 'pending' as const })));
 
-    try {
-      const result = await api.triageTicket(user.tenantId, ticket.id);
-      clearTimeout(phase2);
-      clearTimeout(phase3);
-      setTriagePhase(4);
-      setLocalTriageResult(result);
-      
-      onTriageComplete();
-    } catch (err: unknown) {
-      onError((err as ApiError)?.message || 'Triage failed');
-    } finally {
+    const token = getToken();
+    const url = `${API_BASE_URL}/api/v1/tenants/${user.tenantId}/tickets/${ticket.id}/triage/stream`;
+
+    // SSE doesn't support custom headers natively, so we use EventSource with URL token
+    // For JWT auth with SSE, we use a fetch-based approach
+    const controller = new AbortController();
+
+    fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'text/event-stream',
+      },
+      signal: controller.signal,
+    }).then(async response => {
+      if (!response.ok) {
+        throw new Error(`Triage stream failed: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        let currentEventName = '';
+        let currentData = '';
+
+        for (const line of lines) {
+          if (line.startsWith('event:')) {
+            currentEventName = line.slice(6).trim();
+          } else if (line.startsWith('data:')) {
+            currentData = line.slice(5).trim();
+          } else if (line === '' && currentData) {
+            // End of event — process it
+            try {
+              const event = JSON.parse(currentData);
+              const stage = event.stage as string;
+              const message = event.message as string;
+              const data = event.data as StageInfo['data'];
+
+              if (stage === 'ERROR') {
+                // Mark current active stage as error
+                setStages(prev => prev.map(s =>
+                  s.status === 'active' ? { ...s, status: 'error' as const } : s
+                ));
+                onError(message);
+              } else if (stage === 'COMPLETE') {
+                // Mark all stages as done
+                setStages(prev => prev.map(s =>
+                  s.status !== 'error' ? { ...s, status: 'done' as const } : s
+                ));
+                if (data && !Array.isArray(data)) {
+                  setLocalTriageResult({
+                    category: data.category as string,
+                    priority: data.priority as string,
+                    confidenceScore: data.confidenceScore as number,
+                    suggestedReply: data.suggestedReply as string,
+                    reasoning: data.reasoning as string,
+                    autoResolvable: data.autoResolvable as boolean,
+                  });
+                }
+                setStreamComplete(true);
+                onTriageComplete();
+              } else {
+                // Mark previous active stages as done, set current as active
+                setStages(prev => prev.map(s => {
+                  if (s.id === stage) return { ...s, status: 'active' as const, message, data };
+                  if (s.status === 'active') return { ...s, status: 'done' as const };
+                  return s;
+                }));
+
+                // If stage not in template list, add it
+                updateStage(stage, 'active', message, data);
+              }
+            } catch {
+              // Skip unparseable events
+            }
+            currentEventName = '';
+            currentData = '';
+          }
+        }
+      }
+    }).catch(err => {
+      if (err.name !== 'AbortError') {
+        console.error('SSE stream error:', err);
+        onError(err.message || 'Triage stream failed');
+      }
+    }).finally(() => {
       setTimeout(() => {
         setTriaging(false);
-        setTriagePhase(0);
-      }, 500);
-    }
+      }, 800);
+    });
   }
+
+  const showPipeline = triaging || (streamComplete && stages.length > 0 && !displayResult);
 
   return (
     <div className={`glass glass--static ${styles.section} ${styles.triageSection} ${triaging ? styles.triageActive : ''}`}>
@@ -71,19 +197,58 @@ export function TriagePanel({ ticket, initialResult, onTriageComplete, onError }
       </div>
 
       <AnimatePresence mode="wait">
-        {triaging && (
+        {showPipeline && (
           <motion.div
-            className={styles.triageAnim}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            className={styles.triagePipeline}
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.3 }}
           >
-            <div className={styles.triagePulse} />
-            <p className={styles.triageText}>
-              {triagePhase === 1 && 'Analyzing ticket context...'}
-              {triagePhase === 2 && 'Searching knowledge base...'}
-              {triagePhase === 3 && 'Generating classification...'}
-            </p>
+            {stages.map((stage, i) => (
+              <motion.div
+                key={stage.id}
+                className={`${styles.pipelineStage} ${styles[`stage--${stage.status}`]}`}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: i * 0.05, duration: 0.3 }}
+              >
+                <div className={styles.stageIndicator}>
+                  {stage.status === 'done' && <Check size={12} />}
+                  {stage.status === 'active' && <Loader2 size={12} className={styles.spinning} />}
+                  {stage.status === 'error' && <AlertCircle size={12} />}
+                  {stage.status === 'pending' && <span className={styles.stageDot} />}
+                </div>
+                <div className={styles.stageContent}>
+                  <div className={styles.stageLabel}>
+                    {stage.icon}
+                    <span>{stage.label}</span>
+                  </div>
+                  {stage.message && stage.status !== 'pending' && (
+                    <motion.span
+                      className={styles.stageMessage}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                    >
+                      {stage.message}
+                    </motion.span>
+                  )}
+                  {stage.id === 'KB_RESULTS' && stage.data && Array.isArray(stage.data) && (
+                    <motion.div
+                      className={styles.stageArticles}
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                    >
+                      {(stage.data as KBArticle[]).map((article: KBArticle, idx: number) => (
+                        <span key={idx} className={styles.articleTag}>
+                          {article.title} ({article.similarity})
+                        </span>
+                      ))}
+                    </motion.div>
+                  )}
+                </div>
+              </motion.div>
+            ))}
           </motion.div>
         )}
       </AnimatePresence>

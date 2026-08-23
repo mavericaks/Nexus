@@ -11,12 +11,13 @@
 [![Redis](https://img.shields.io/badge/Redis-7.0-DC382D?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![Swagger](https://img.shields.io/badge/API_Docs-Swagger_UI-85EA2D?style=for-the-badge&logo=swagger&logoColor=black)](https://nexus-tep5.onrender.com/swagger-ui.html)
 
 <p align="center">
   <strong>An enterprise-grade, multi-tenant customer support platform engineering zero-trust database isolation, sub-second semantic RAG over vector embeddings, autonomous LLM triage with mathematical confidence scoring, and high-throughput event-driven messaging.</strong>
 </p>
 
-[Key Features](#-key-features) • [System Architecture](#-system-architecture) • [AI Triage & RAG](#-ai-triage--semantic-rag-engine) • [Multi-Tenancy & RLS](#-multi-tenancy--zero-leakage-security) • [State Machine](#-ticket-state-machine) • [Tech Stack](#-technology-stack) • [Quick Start](#-quick-start) • [Documentation](#-project-documentation)
+[Key Features](#-key-features) • [Architecture](#-system-architecture) • [AI Triage & RAG](#-ai-triage--semantic-rag-engine) • [Multi-Tenancy](#-multi-tenancy--zero-leakage-security) • [State Machine](#-ticket-state-machine) • [Tech Stack](#-technology-stack) • [Quick Start](#-quick-start) • [ADRs](./docs/ARCHITECTURE_DECISIONS.md) • [API Docs](#-api-documentation) • [Documentation](#-project-documentation)
 
 </div>
 
@@ -41,6 +42,8 @@
 - ⏱️ **Atomic Distributed Rate Limiter**: Redis-backed sliding-window rate limiting executed via atomic Lua scripts to prevent noisy-neighbor tenant starvation.
 - 📊 **Full Observability & Audit Trail**: Micrometer metrics, Prometheus/Grafana dashboard telemetry, and MDC-propagated `traceId`/`tenantId` structured logging.
 - 🎨 **Next.js 15 App Router Workspace**: Sleek dark-glassmorphic user interface, keyboard-driven Command Palette (`⌘K`), real-time triage animations, and optimistic state updates.
+- 📡 **Real-Time SSE Streaming Triage**: Server-Sent Events pipeline streaming each AI triage stage (KB search → LLM analysis → confidence scoring) to the frontend with animated step-by-step visualization.
+- 🧪 **Resilience Load Testing**: k6 circuit breaker demo script simulating normal → burst → recovery phases to validate Resilience4j failover behavior under pressure.
 
 ---
 
@@ -383,8 +386,46 @@ Once Docker Compose is running, access the local telemetry interfaces:
 
 ---
 
+## 📊 Observability & Monitoring
+
+Nexus ships with a **pre-provisioned Grafana dashboard** (`Nexus AI Triage`) that visualizes the full triage pipeline health in real-time via Prometheus metric scraping.
+
+<div align="center">
+  <img src="./docs/images/grafana-dashboard.jpg" alt="Nexus AI Triage — Grafana Dashboard" width="100%" />
+  <p><em>Grafana dashboard: Triage volume, latency percentiles, confidence scores, circuit breaker state, and JVM health</em></p>
+</div>
+
+### Dashboard Panels
+
+| Panel | Type | What It Shows |
+|---|---|---|
+| **Triage Volume by Category** | Time-series bar | Tickets triaged/sec broken down by AI-assigned category (BILLING, TECHNICAL, ACCOUNT, GENERAL) |
+| **Auto-Resolve Rate** | Stat gauge | % of tickets resolved autonomously (confidence ≥ threshold) |
+| **Total Tickets Triaged** | Counter stat | Cumulative triage count |
+| **Triage Duration (p50/p95/p99)** | Latency lines | End-to-end triage latency percentiles (KB search + LLM call + scoring) |
+| **Rate Limit Denials by Tenant** | Time-series | Redis sliding-window rejections per tenant — detects noisy neighbors |
+| **Avg Confidence Score** | Category gauge | Mean AI confidence per ticket category |
+| **Circuit Breaker: groq-llm** | State indicator | Resilience4j circuit state: CLOSED → OPEN → HALF_OPEN |
+| **JVM Memory Usage** | Heap/non-heap | Runtime memory footprint |
+
+> **Run locally:** `docker compose up -d` → Grafana at [http://localhost:13000](http://localhost:13000) (anonymous access enabled, no login required)
+
+---
+
+## 📡 API Documentation
+
+Nexus auto-generates interactive API documentation using **SpringDoc OpenAPI**:
+
+- **Swagger UI**: [`/swagger-ui.html`](https://nexus-tep5.onrender.com/swagger-ui.html) — Interactive endpoint explorer with JWT auth support
+- **OpenAPI Spec**: [`/v3/api-docs`](https://nexus-tep5.onrender.com/v3/api-docs) — Machine-readable OpenAPI 3.0 specification
+
+All endpoints are documented with request/response schemas and grouped by feature module.
+
+---
+
 ## 📖 Project Documentation
 
+- 🏗️ [**`docs/ARCHITECTURE_DECISIONS.md`**](./docs/ARCHITECTURE_DECISIONS.md) — Narrative architecture decision records: why RLS, dual-vendor AI, mathematical confidence scoring, Kafka event publishing, and Redis Lua rate limiting
 - 📑 [**`PROJECT_ANALYSIS.md`**](./PROJECT_ANALYSIS.md) — Comprehensive technical architecture, database schemas, and source code inventory
 - 📋 [**`CURRENT_STATE.md`**](./CURRENT_STATE.md) — Complete 12-phase implementation milestone scorecard and test verification evidence
 - 🏛️ [**`docs/adr/`**](./docs/adr/) — Architectural Decision Records (ADRs) detailing modular monolith vs. microservices, embedding providers, and tool calling

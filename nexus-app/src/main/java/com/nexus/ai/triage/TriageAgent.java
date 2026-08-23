@@ -95,6 +95,68 @@ public class TriageAgent {
     }
 
     /**
+     * Streaming variant of {@link #triage} — emits stage events as the pipeline
+     * progresses. Used by the SSE endpoint to stream real-time updates to the UI.
+     *
+     * @param subject     the ticket subject
+     * @param description the ticket description
+     * @param onStage     callback invoked for each pipeline stage event
+     * @return the triage result
+     */
+    public TriageResult triageWithStages(String subject, String description,
+                                          java.util.function.Consumer<TriageStageEvent> onStage) {
+        log.info("Triaging ticket (streaming): '{}'", subject);
+
+        // Stage 1: KB Search
+        onStage.accept(TriageStageEvent.progress("KB_SEARCH", "Searching knowledge base..."));
+        String query = subject + " " + description;
+        List<RetrievedArticle> articles = kbSearchService.search(query);
+        onStage.accept(new TriageStageEvent("KB_RESULTS",
+                "Found " + articles.size() + " relevant article" + (articles.size() != 1 ? "s" : ""),
+                articles.stream().map(a -> java.util.Map.of(
+                        "title", a.title(),
+                        "similarity", String.format("%.0f%%", a.similarityScore() * 100)
+                )).toList()));
+
+        // Stage 2: Build prompt
+        String kbContext = articles.isEmpty()
+                ? "No relevant knowledge base articles found."
+                : articles.stream()
+                    .map(RetrievedArticle::toPromptContext)
+                    .collect(Collectors.joining("\n"));
+        String systemPrompt = buildSystemPrompt();
+        String userPrompt = buildUserPrompt(subject, description, kbContext);
+
+        // Stage 3: LLM Call
+        onStage.accept(TriageStageEvent.progress("LLM_CALL", "Analyzing with AI (Llama 3.3 70B)..."));
+        String llmResponse;
+        try {
+            llmResponse = callLlm(systemPrompt, userPrompt);
+            onStage.accept(TriageStageEvent.progress("LLM_RESPONSE", "AI response received"));
+        } catch (Exception e) {
+            log.error("LLM call failed during streaming triage: {}", e.getMessage());
+            onStage.accept(TriageStageEvent.error("AI service unavailable — escalating to human agent"));
+            return fallbackResult(subject, articles);
+        }
+
+        // Stage 4: Confidence scoring
+        onStage.accept(TriageStageEvent.progress("CONFIDENCE", "Computing confidence score..."));
+        TriageResult result = parseResponse(llmResponse, articles);
+
+        // Stage 5: Complete
+        onStage.accept(TriageStageEvent.complete(java.util.Map.of(
+                "category", result.category().name(),
+                "priority", result.priority().name(),
+                "confidenceScore", result.confidenceScore(),
+                "autoResolvable", result.autoResolvable(),
+                "suggestedReply", result.suggestedReply(),
+                "reasoning", result.reasoning()
+        )));
+
+        return result;
+    }
+
+    /**
      * The actual LLM network call, isolated in its own method so Resilience4j
      * can proxy it with circuit breaker and retry annotations.
      *

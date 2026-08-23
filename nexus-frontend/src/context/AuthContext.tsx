@@ -17,6 +17,8 @@ interface AuthContextType {
   isAuthenticated: boolean;
   authError: string | null;
   login: () => void;
+  demoLogin: () => Promise<void>;
+  isDemoLoading: boolean;
   logout: () => void;
   clearError: () => void;
 }
@@ -62,9 +64,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
+  const [isDemoLoading, setIsDemoLoading] = useState(false);
+
   const login = useCallback(() => {
     // Redirect to Spring Boot OAuth2 login endpoint
     window.location.href = `${API_BASE_URL}/oauth2/authorization/google`;
+  }, []);
+
+  const demoLogin = useCallback(async () => {
+    setIsDemoLoading(true);
+    setAuthError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/auth/demo-login`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        throw new Error('Demo login unavailable. The server may not have demo mode enabled.');
+      }
+      const data = await res.json();
+      setToken(data.token);
+      setUser(getUserFromToken());
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Demo login failed');
+    } finally {
+      setIsDemoLoading(false);
+    }
   }, []);
 
   const logout = useCallback(() => {
@@ -82,6 +106,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isAuthenticated: !!user,
     authError,
     login,
+    demoLogin,
+    isDemoLoading,
     logout,
     clearError,
   };

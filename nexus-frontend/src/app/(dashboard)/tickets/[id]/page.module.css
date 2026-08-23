@@ -217,6 +217,132 @@
   font-size: 14px;
 }
 
+/* ─── Pipeline Stages (SSE streaming) ────────────────────────────── */
+.triagePipeline {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3) 0;
+  overflow: hidden;
+}
+
+.pipelineStage {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  transition: all 0.3s ease;
+}
+
+.stageIndicator {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+  transition: all 0.3s ease;
+}
+
+.stageDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Stage states */
+.stage--pending .stageIndicator {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-tertiary);
+}
+
+.stage--pending .stageLabel {
+  color: var(--text-tertiary);
+  opacity: 0.5;
+}
+
+.stage--active .stageIndicator {
+  background: rgba(99, 102, 241, 0.2);
+  color: var(--accent-primary);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.3);
+}
+
+.stage--active .stageLabel {
+  color: var(--text-primary);
+}
+
+.stage--active {
+  background: rgba(99, 102, 241, 0.04);
+}
+
+.stage--done .stageIndicator {
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+}
+
+.stage--done .stageLabel {
+  color: var(--text-secondary);
+}
+
+.stage--error .stageIndicator {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.stage--error .stageLabel {
+  color: #ef4444;
+}
+
+.stageContent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stageLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  font-weight: 500;
+  transition: color 0.3s ease;
+}
+
+.stageMessage {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding-left: calc(14px + var(--space-2));
+}
+
+.stageArticles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding-left: calc(14px + var(--space-2));
+  padding-top: var(--space-1);
+  overflow: hidden;
+}
+
+.articleTag {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: var(--radius-full);
+  color: #a5b4fc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+
 /* ─── Gauge ──────────────────────────────────────────────────────── */
 .gauge {
   position: relative;

@@ -160,4 +160,88 @@ public class TriageService {
 
         return result;
     }
+
+    /**
+     * Streaming variant of {@link #triageTicket} that emits stage events
+     * via the provided callback. Used by the SSE endpoint.
+     *
+     * <p>Performs the same state machine transitions and metrics recording
+     * as the non-streaming variant.
+     *
+     * @param ticketId the ticket to triage
+     * @param onStage  callback invoked for each pipeline stage event
+     */
+    @Transactional
+    public void triageTicketStreaming(UUID ticketId,
+                                      java.util.function.Consumer<com.nexus.ai.triage.TriageStageEvent> onStage) {
+        TicketEntity ticket = ticketRepository.findById(ticketId)
+                .orElseThrow(() -> new TicketNotFoundException(ticketId));
+
+        if (ticket.getStatus() != TicketStatus.NEW) {
+            onStage.accept(com.nexus.ai.triage.TriageStageEvent.error(
+                    "Ticket is in status " + ticket.getStatus() + ", not NEW — skipping triage"));
+            return;
+        }
+
+        long startNanos = System.nanoTime();
+
+        TriageResult result = triageAgent.triageWithStages(
+                ticket.getSubject(), ticket.getDescription(), onStage);
+
+        long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
+
+        // Apply the same state transitions as the non-streaming variant
+        ticket.setCategory(result.category());
+        ticket.setPriority(result.priority());
+        ticket.setAiResponse(result.suggestedReply());
+        ticket.setConfidenceScore(result.confidenceScore());
+
+        if (TicketStateMachine.canTransition(ticket.getStatus(), TicketStatus.CLASSIFIED)) {
+            TicketStatus oldStatus = ticket.getStatus();
+            ticket.setStatus(TicketStatus.CLASSIFIED);
+            eventPublisher.publishEvent(new TicketStatusChangedEvent(
+                    ticket.getTenant().getId(), ticketId, oldStatus, TicketStatus.CLASSIFIED));
+        }
+
+        if (TicketStateMachine.canTransition(ticket.getStatus(), TicketStatus.AI_DRAFTED)) {
+            TicketStatus oldStatus = ticket.getStatus();
+            ticket.setStatus(TicketStatus.AI_DRAFTED);
+            eventPublisher.publishEvent(new TicketStatusChangedEvent(
+                    ticket.getTenant().getId(), ticketId, oldStatus, TicketStatus.AI_DRAFTED));
+        }
+
+        if (result.autoResolvable() &&
+            TicketStateMachine.canTransition(ticket.getStatus(), TicketStatus.AUTO_RESOLVED)) {
+            TicketStatus oldStatus = ticket.getStatus();
+            ticket.setStatus(TicketStatus.AUTO_RESOLVED);
+            eventPublisher.publishEvent(new TicketStatusChangedEvent(
+                    ticket.getTenant().getId(), ticketId, oldStatus, TicketStatus.AUTO_RESOLVED));
+        } else if (!result.autoResolvable() &&
+                   TicketStateMachine.canTransition(ticket.getStatus(), TicketStatus.ESCALATED)) {
+            TicketStatus oldStatus = ticket.getStatus();
+            ticket.setStatus(TicketStatus.ESCALATED);
+            eventPublisher.publishEvent(new TicketStatusChangedEvent(
+                    ticket.getTenant().getId(), ticketId, oldStatus, TicketStatus.ESCALATED));
+        }
+
+        ticketRepository.save(ticket);
+        auditLogger.logTriageDecision(ticketId, result, durationMs);
+
+        Timer.builder("ticket.triage.duration")
+                .tag("category", result.category().name())
+                .tag("autoResolved", String.valueOf(result.autoResolvable()))
+                .register(meterRegistry)
+                .record(durationMs, TimeUnit.MILLISECONDS);
+
+        Counter.builder("ticket.triage.count")
+                .tag("category", result.category().name())
+                .tag("autoResolved", String.valueOf(result.autoResolvable()))
+                .register(meterRegistry)
+                .increment();
+
+        DistributionSummary.builder("ticket.triage.confidence")
+                .tag("category", result.category().name())
+                .register(meterRegistry)
+                .record(result.confidenceScore());
+    }
 }
