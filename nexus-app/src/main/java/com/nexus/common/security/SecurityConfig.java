@@ -69,7 +69,7 @@ public class SecurityConfig {
                         // Public endpoints — login, health check, OAuth2 flow
                         .requestMatchers("/api/v1/auth/**").permitAll()
                         .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
-                        .requestMatchers("/actuator/health").permitAll()
+                        .requestMatchers("/actuator/**").permitAll()
 
                         // Swagger UI / OpenAPI (Phase 2)
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html",
