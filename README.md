@@ -322,7 +322,15 @@ JWT_SECRET=404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
 # Linux / macOS
 ./mvnw spring-boot:run -pl nexus-app -Dspring-boot.run.profiles=dev
 ```
-*The backend boots on `http://localhost:8080` with Flyway running migrations V1 through V12 automatically.*
+### 3. Run Backend (`nexus-app`)
+```bash
+# Windows PowerShell
+.\scripts\start-backend.ps1
+
+# Linux / macOS
+./mvnw spring-boot:run -pl nexus-app -Dspring-boot.run.profiles=dev
+```
+*The backend boots on `http://localhost:8080` (or `http://localhost:18080`) with Flyway running migrations V1 through V13 automatically.*
 
 ---
 
@@ -336,14 +344,15 @@ cd nexus-frontend
 npm install
 npm run dev
 ```
-*The web dashboard is now accessible at [http://localhost:3000](http://localhost:3000).*
+*The web dashboard is accessible at [http://localhost:3000](http://localhost:3000).*
 
 ---
 
-### 5. Default Seed Accounts
+### 5. Seed Accounts & One-Click Demo
 
-| Email | Password | Tenant | Role | Capabilities |
+| Email | Password / Access | Tenant | Role | Capabilities |
 |---|---|---|---|---|
+| `demo@nexus.dev` | **1-Click Demo** (Click *"⚡ Try Live Demo"* on landing page) | Acme Corp | `ROLE_AGENT`, `ROLE_ADMIN` | Pre-loaded with 10 realistic tickets & SSE triage testing |
 | `owner@acme.com` | `password123` | Acme Corp | `ROLE_OWNER` | Full Tenant Administration & Billing |
 | `admin@acme.com` | `password123` | Acme Corp | `ROLE_ADMIN` | Ticket Deletion, KB & Template Management |
 | `agent@acme.com` | `password123` | Acme Corp | `ROLE_AGENT` | Ticket Creation, Status Transitions, Internal Notes |
@@ -373,16 +382,21 @@ Run the automated test suites:
 
 ---
 
-## 📊 Observability & Monitoring
+## 🌐 Access Directory & Live Services
 
-Once Docker Compose is running, access the local telemetry interfaces:
+### Local Infrastructure & Services (Docker Compose)
 
-| Service | URL | Default Credentials | Description |
+| Service | Local URL / Port | Auth / Credentials | Description |
 |---|---|---|---|
-| **Nexus Frontend** | [http://localhost:3000](http://localhost:3000) | *See Seed Accounts* | Support Agent & Admin Workspace |
-| **Backend Actuator** | [http://localhost:8080/actuator](http://localhost:8080/actuator) | — | Health, Prometheus Metrics, Environment |
-| **Prometheus** | [http://localhost:19090](http://localhost:19090) | — | Raw Time-Series Metric Scraper |
-| **Grafana** | [http://localhost:3001](http://localhost:3001) | `admin` / `admin` | Pre-configured Triage Performance Dashboards |
+| **Web Frontend** | [http://localhost:3000](http://localhost:3000) | 1-Click Demo or Seed Accounts | Next.js 15 Agent Workspace & Triage UI |
+| **Backend API** | [http://localhost:8080](http://localhost:8080) (or `:18080`) | JWT Bearer Token | Spring Boot 3.4 REST API & SSE Streaming |
+| **Swagger UI** | [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html) | Interactive (Authorize via JWT) | OpenAPI 3.0 API Documentation Explorer |
+| **Grafana Dashboard** | [http://localhost:13000](http://localhost:13000) | Anonymous Admin (no login required) | Real-time AI Triage Performance Dashboard |
+| **Prometheus** | [http://localhost:19090](http://localhost:19090) | No auth required | Raw Time-Series Scraper & PromQL Engine |
+| **PostgreSQL 16 (pgvector)** | `localhost:15432` | `nexus` / `nexus_local` (DB: `nexus`) | Relational + 768-dim HNSW Vector Store |
+| **PostgreSQL App Role (RLS)** | `localhost:15432` | `nexus_app` / `nexus_app_local` (DB: `nexus`) | Low-privilege Row-Level Security Role |
+| **Redis** | `localhost:16379` | No password | Sliding-window Lua rate limiter & RAG cache |
+| **Apache Kafka (KRaft)** | `localhost:19092` | Bootstrap: `localhost:19092` | Event broker for ticket lifecycle events |
 
 ---
 
@@ -408,7 +422,7 @@ Nexus ships with a **pre-provisioned Grafana dashboard** (`Nexus AI Triage`) tha
 | **Circuit Breaker: groq-llm** | State indicator | Resilience4j circuit state: CLOSED → OPEN → HALF_OPEN |
 | **JVM Memory Usage** | Heap/non-heap | Runtime memory footprint |
 
-> **Run locally:** `docker compose up -d` → Grafana at [http://localhost:13000](http://localhost:13000) (anonymous access enabled, no login required)
+> **Run locally:** `docker compose up -d` → Open Grafana at [http://localhost:13000](http://localhost:13000)
 
 ---
 
@@ -416,7 +430,7 @@ Nexus ships with a **pre-provisioned Grafana dashboard** (`Nexus AI Triage`) tha
 
 Nexus auto-generates interactive API documentation using **SpringDoc OpenAPI**:
 
-- **Swagger UI**: [`/swagger-ui.html`](https://nexus-tep5.onrender.com/swagger-ui.html) — Interactive endpoint explorer with JWT auth support
+- **Swagger UI**: [`/swagger-ui.html`](https://nexus-tep5.onrender.com/swagger-ui.html) (or `http://localhost:8080/swagger-ui.html` locally) — Interactive endpoint explorer with JWT auth support
 - **OpenAPI Spec**: [`/v3/api-docs`](https://nexus-tep5.onrender.com/v3/api-docs) — Machine-readable OpenAPI 3.0 specification
 
 All endpoints are documented with request/response schemas and grouped by feature module.
