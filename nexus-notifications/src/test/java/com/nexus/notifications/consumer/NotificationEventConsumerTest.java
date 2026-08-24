@@ -20,7 +20,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.timeout;
 
 @SpringBootTest(classes = NotificationApplication.class)
-@EmbeddedKafka(partitions = 1, brokerProperties = { "listeners=PLAINTEXT://localhost:9092", "port=9092" })
+@EmbeddedKafka(partitions = 1, bootstrapServersProperty = "spring.kafka.bootstrap-servers")
 @TestPropertySource(properties = {
     "spring.kafka.producer.key-serializer=org.apache.kafka.common.serialization.StringSerializer",
     "spring.kafka.producer.value-serializer=org.springframework.kafka.support.serializer.JsonSerializer"

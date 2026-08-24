@@ -1,0 +1,113 @@
+Nexus — Benchmark & Evidence Collection Plan
+Purpose: generate real, reproducible performance and reliability evidence for the final Backend resume.
+1. What I need from you
+Run the tests below on Nexus, record the raw results, and push the benchmark scripts/results into GitHub. Do not optimize for impressive numbers. Optimize for reproducibility and honest measurement. If a test is impractical, skip it and record why.
+2. Environment — record this first
+CPU model and number of cores/threads
+RAM
+OS and version
+Java version
+Docker version
+PostgreSQL version
+Redis version
+Kafka version
+Nexus Git commit/branch tested
+Whether services ran natively or in Docker
+Whether tests ran locally or on a VM/cloud machine
+Example: record the exact environment once in benchmarks/README.md so every result has context.
+3. Priority A — API load/performance benchmark
+This is the most valuable missing evidence for the Backend resume.
+Test
+What to measure
+Suggested load
+Health/basic API
+Baseline latency
+10–20 requests
+Ticket creation
+throughput + p50/p95/p99 latency
+10, 50, 100 concurrent users
+Ticket retrieval
+throughput + p50/p95/p99 latency
+10, 50, 100 concurrent users
+Ticket listing/search
+throughput + p50/p95/p99 latency
+10, 50, 100 concurrent users
+For each endpoint, report: total requests, duration, requests/sec, average latency, p50, p95, p99, error rate, concurrency, and test environment.
+Important: use a warm-up phase and then a measured phase. If the application cannot sustain a load, record the failure point instead of hiding it.
+4. Priority A — AI/RAG benchmark
+Measure end-to-end AI ticket-triage latency for a representative set of tickets.
+Measure retrieval latency separately if the code makes retrieval timing observable.
+Record number of tickets tested.
+Record successful AI responses, failures/timeouts, and auto-resolution decisions.
+Record the confidence threshold used (currently the application logic uses a defined confidence threshold).
+If possible, compare retrieval with and without the vector-search path only when the comparison is technically meaningful.
+Useful final evidence could look like: 'N tickets, median triage latency X ms, p95 Y ms, Z% successful responses.' Do not claim model accuracy unless you have a labeled evaluation dataset.
+5. Priority B — concurrency/scalability test
+Determine how Nexus behaves as concurrent traffic increases. Test approximately 10 → 25 → 50 → 100 concurrent clients (reduce the levels if the machine cannot support them).
+Record requests/sec at each level.
+Record p95/p99 latency.
+Record HTTP error/timeout rate.
+Record CPU and memory usage if practical.
+Identify the point where latency or error rate degrades materially.
+The result we want is not 'supports 100 users' unless the test actually demonstrates that. A defensible statement is more like: 'At 100 concurrent requests, sustained X req/s with Y ms p95 latency and Z% errors.'
+6. Priority B — database/vector-search benchmark
+Measure representative PostgreSQL query latency for ticket retrieval/listing.
+Measure pgvector semantic-search latency for the configured embedding dimension and index.
+Record query count, dataset size, average latency and p95 latency.
+If the dataset is too small for a meaningful benchmark, explicitly record the dataset size rather than implying production-scale performance.
+7. Priority B — resilience/failure tests
+Nexus already contains resilience mechanisms. Demonstrate that they actually behave as intended.
+Redis unavailable: observe rate limiting/cache behavior and application response.
+Kafka unavailable: observe event publication failure/retry behavior.
+Notification service unavailable: verify circuit breaker/retry/fallback behavior.
+Database temporarily unavailable: observe application behavior and recovery.
+If practical, introduce one failure at a time and restore the dependency.
+Record: failure injected, expected behavior, observed behavior, recovery time, and whether requests were lost or returned errors.
+8. Priority C — test/quality evidence
+Run the complete automated test suite from a clean environment.
+Record total tests, passed, failed, skipped and total execution time.
+Record integration-test execution separately if available.
+Record ArchUnit results separately if available.
+Record Testcontainers/integration test results separately if available.
+Capture the exact CI run URL/commit if GitHub Actions runs the suite.
+9. Metrics I specifically want to extract
+Metric
+Result
+Throughput: requests/sec
+Fill in
+Latency: average, p50, p95, p99
+Fill in
+Error rate / timeout rate
+Fill in
+Maximum sustainable concurrency tested
+Fill in
+AI triage latency
+Fill in
+Vector-search latency
+Fill in
+Database query latency
+Fill in
+Test count and pass rate
+Fill in
+Test-suite execution time
+Fill in
+Recovery time after dependency failure
+Fill in
+CPU/RAM utilization under load, if practical
+Fill in
+10. What NOT to do
+Do not invent a production-scale claim from a tiny local test.
+Do not report a single best-case latency without stating the load.
+Do not claim accuracy without labeled ground truth.
+Do not compare two systems unless both were tested under equivalent conditions.
+Do not benchmark only a trivial health endpoint and call it application performance.
+Do not hide failed or unstable runs; record them.
+Do not round results aggressively. Keep raw measurements and calculate the resume number from them.
+11. Recommended repository structure
+benchmarks/├── README.md├── api-load/├── concurrency/├── rag/├── database/├── resilience/└── results/    ├── api-results.md    ├── rag-results.md    ├── resilience-results.md    └── environment.md
+12. Minimum acceptable result for tomorrow
+If you are short on time, do only these three things:
+1) API load test with at least 10/50/100 concurrency levels where the machine permits it.
+2) AI/RAG end-to-end latency test over a meaningful batch of tickets.
+3) Full test-suite run with exact pass count and execution time.
+Push the benchmark scripts plus raw/summary results to GitHub. I can then inspect the repository and turn the evidence into 2–3 high-impact STAR bullets for Nexus, selecting the strongest metric rather than forcing every available number into the resume.

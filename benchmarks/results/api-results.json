@@ -1,0 +1,221 @@
+{
+  "metadata": {
+    "timestamp": "2026-08-24T18:18:38Z",
+    "environment": "11th Gen Intel Core i5-11400H, 6C/12T, 16GB RAM, Win11, Java 21 LTS",
+    "warmup_requests": 50
+  },
+  "endpoints": {
+    "Health Baseline": [
+      {
+        "total_requests": 200,
+        "duration_sec": 0.064,
+        "rps": 3133.43,
+        "mean_ms": 2.74,
+        "median_p50_ms": 2.7,
+        "p90_ms": 3.89,
+        "p95_ms": 4.46,
+        "p99_ms": 6.31,
+        "min_ms": 0.96,
+        "max_ms": 6.54,
+        "error_rate_pct": 0.0,
+        "status_codes": {
+          "200": 200
+        },
+        "concurrency": 10
+      },
+      {
+        "total_requests": 500,
+        "duration_sec": 0.093,
+        "rps": 5351.16,
+        "mean_ms": 3.67,
+        "median_p50_ms": 3.46,
+        "p90_ms": 5.06,
+        "p95_ms": 7.47,
+        "p99_ms": 9.18,
+        "min_ms": 1.02,
+        "max_ms": 9.92,
+        "error_rate_pct": 0.0,
+        "status_codes": {
+          "200": 500
+        },
+        "concurrency": 50
+      },
+      {
+        "total_requests": 1000,
+        "duration_sec": 0.162,
+        "rps": 6167.0,
+        "mean_ms": 3.97,
+        "median_p50_ms": 3.75,
+        "p90_ms": 5.69,
+        "p95_ms": 7.0,
+        "p99_ms": 9.83,
+        "min_ms": 1.0,
+        "max_ms": 14.61,
+        "error_rate_pct": 0.0,
+        "status_codes": {
+          "200": 1000
+        },
+        "concurrency": 100
+      }
+    ],
+    "Ticket Creation (POST /tickets)": [
+      {
+        "total_requests": 200,
+        "duration_sec": 0.343,
+        "rps": 582.97,
+        "mean_ms": 16.3,
+        "median_p50_ms": 16.45,
+        "p90_ms": 22.01,
+        "p95_ms": 22.36,
+        "p99_ms": 23.08,
+        "min_ms": 8.63,
+        "max_ms": 23.09,
+        "error_rate_pct": 0.0,
+        "status_codes": {
+          "201": 200
+        },
+        "concurrency": 10
+      },
+      {
+        "total_requests": 500,
+        "duration_sec": 0.225,
+        "rps": 2222.04,
+        "mean_ms": 18.59,
+        "median_p50_ms": 18.28,
+        "p90_ms": 25.25,
+        "p95_ms": 26.15,
+        "p99_ms": 30.21,
+        "min_ms": 9.88,
+        "max_ms": 34.68,
+        "error_rate_pct": 0.0,
+        "status_codes": {
+          "201": 500
+        },
+        "concurrency": 50
+      },
+      {
+        "total_requests": 1000,
+        "duration_sec": 0.292,
+        "rps": 3420.37,
+        "mean_ms": 22.45,
+        "median_p50_ms": 21.82,
+        "p90_ms": 30.63,
+        "p95_ms": 33.13,
+        "p99_ms": 43.55,
+        "min_ms": 11.36,
+        "max_ms": 53.83,
+        "error_rate_pct": 0.0,
+        "status_codes": {
+          "201": 1000
+        },
+        "concurrency": 100
+      }
+    ],
+    "Ticket Retrieval (GET /tickets/{id})": [
+      {
+        "total_requests": 200,
+        "duration_sec": 0.117,
+        "rps": 1713.91,
+        "mean_ms": 5.34,
+        "median_p50_ms": 5.47,
+        "p90_ms": 7.34,
+        "p95_ms": 7.48,
+        "p99_ms": 7.89,
+        "min_ms": 2.24,
+        "max_ms": 7.92,
+        "error_rate_pct": 0.0,
+        "status_codes": {
+          "200": 200
+        },
+        "concurrency": 10
+      },
+      {
+        "total_requests": 500,
+        "duration_sec": 0.1,
+        "rps": 5020.19,
+        "mean_ms": 6.14,
+        "median_p50_ms": 5.97,
+        "p90_ms": 8.69,
+        "p95_ms": 9.76,
+        "p99_ms": 12.95,
+        "min_ms": 2.57,
+        "max_ms": 15.24,
+        "error_rate_pct": 0.0,
+        "status_codes": {
+          "200": 500
+        },
+        "concurrency": 50
+      },
+      {
+        "total_requests": 1000,
+        "duration_sec": 0.186,
+        "rps": 5368.22,
+        "mean_ms": 7.63,
+        "median_p50_ms": 7.42,
+        "p90_ms": 10.55,
+        "p95_ms": 12.07,
+        "p99_ms": 15.68,
+        "min_ms": 2.78,
+        "max_ms": 20.52,
+        "error_rate_pct": 0.0,
+        "status_codes": {
+          "200": 1000
+        },
+        "concurrency": 100
+      }
+    ],
+    "Ticket Listing (GET /tickets?page=0&size=15)": [
+      {
+        "total_requests": 200,
+        "duration_sec": 0.208,
+        "rps": 960.05,
+        "mean_ms": 9.94,
+        "median_p50_ms": 9.9,
+        "p90_ms": 13.51,
+        "p95_ms": 14.0,
+        "p99_ms": 14.86,
+        "min_ms": 4.79,
+        "max_ms": 15.22,
+        "error_rate_pct": 0.0,
+        "status_codes": {
+          "200": 200
+        },
+        "concurrency": 10
+      },
+      {
+        "total_requests": 500,
+        "duration_sec": 0.151,
+        "rps": 3314.03,
+        "mean_ms": 11.37,
+        "median_p50_ms": 11.41,
+        "p90_ms": 16.05,
+        "p95_ms": 16.56,
+        "p99_ms": 20.19,
+        "min_ms": 5.02,
+        "max_ms": 23.86,
+        "error_rate_pct": 0.0,
+        "status_codes": {
+          "200": 500
+        },
+        "concurrency": 50
+      },
+      {
+        "total_requests": 1000,
+        "duration_sec": 0.211,
+        "rps": 4729.76,
+        "mean_ms": 13.94,
+        "median_p50_ms": 13.82,
+        "p90_ms": 19.26,
+        "p95_ms": 22.09,
+        "p99_ms": 28.76,
+        "min_ms": 5.69,
+        "max_ms": 38.65,
+        "error_rate_pct": 0.0,
+        "status_codes": {
+          "200": 1000
+        },
+        "concurrency": 100
+      }
+    ]
+  }
+}

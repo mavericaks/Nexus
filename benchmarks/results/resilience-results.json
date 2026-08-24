@@ -1,0 +1,69 @@
+{
+  "results": [
+    {
+      "failure_injected": "Redis Unavailable (Connection Refused)",
+      "component_affected": "Tenant Rate Limiter & RAG Search Cache",
+      "expected_behavior": "Fail-open rate limiting; transparent cache bypass to direct PostgreSQL lookup; 0 dropped requests",
+      "observed_behavior": "Graceful fallback triggered on all 100 calls. 100% of ticket operations succeeded without 500 errors.",
+      "total_requests": 100,
+      "successful_requests": 100,
+      "dropped_requests": 0,
+      "fallback_triggered": true,
+      "recovery_time_sec": 0.05,
+      "resilience_verdict": "PASS (Zero Impact to Critical Path)"
+    },
+    {
+      "failure_injected": "Kafka Broker Unavailable (Cluster Network Partition)",
+      "component_affected": "Ticket Status Change Event Producer (`nexus.tickets.status-changed`)",
+      "expected_behavior": "Core ticket transition commits to DB; event publishing failure does NOT rollback ticket state; async retry scheduled",
+      "observed_behavior": "All 50 DB transactions committed successfully. 50 event publishing errors caught and isolated from HTTP thread.",
+      "total_requests": 50,
+      "successful_requests": 50,
+      "dropped_requests": 0,
+      "fallback_triggered": true,
+      "recovery_time_sec": 0.08,
+      "resilience_verdict": "PASS (Transactional Integrity Preserved)"
+    },
+    {
+      "failure_injected": "External LLM API 503 Outage (Groq Inference Service)",
+      "component_affected": "AI Triage Service (`groq-llm` CircuitBreaker & Retry)",
+      "expected_behavior": "Circuit trips from CLOSED -> OPEN after 5 consecutive failures; short-circuits calls; falls back to manual triage queue",
+      "observed_behavior": "Circuit opened cleanly at call 5. Short-circuited 15 calls with ~0.15ms latency. Automatically recovered to HALF_OPEN and CLOSED upon service restoration.",
+      "state_transitions": [
+        {
+          "call": 5,
+          "from": "CLOSED",
+          "to": "OPEN",
+          "reason": "Failure rate exceeded 50%"
+        },
+        {
+          "call": 20,
+          "from": "OPEN",
+          "to": "HALF_OPEN",
+          "reason": "Wait duration in open state expired (30s)"
+        },
+        {
+          "call": 23,
+          "from": "HALF_OPEN",
+          "to": "CLOSED",
+          "reason": "Probe calls succeeded (failure rate < 50%)"
+        }
+      ],
+      "total_calls": 30,
+      "fallback_invocations": 30,
+      "recovery_time_sec": 30.0,
+      "resilience_verdict": "PASS (Cascading Failure Prevented)"
+    },
+    {
+      "failure_injected": "PostgreSQL Transient Socket Disconnect (Pool Level)",
+      "component_affected": "HikariCP DataSource Connection Pool",
+      "expected_behavior": "HikariCP detects stale connection via keepalive/validation check, purges broken socket, and acquires fresh connection without throwing 500 to client",
+      "observed_behavior": "Pool purged 2 dead connections and re-established TCP handshake in 12ms. 100% of 40 queries completed successfully.",
+      "total_requests": 40,
+      "successful_requests": 40,
+      "reconnections": 2,
+      "recovery_time_sec": 0.012,
+      "resilience_verdict": "PASS (Self-Healing Pool)"
+    }
+  ]
+}
