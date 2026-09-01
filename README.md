@@ -17,7 +17,7 @@
   <strong>An enterprise-grade, multi-tenant customer support platform engineering zero-trust database isolation, sub-second semantic RAG over vector embeddings, autonomous LLM triage with mathematical confidence scoring, and high-throughput event-driven messaging.</strong>
 </p>
 
-[Key Features](#-key-features) • [Architecture](#-system-architecture) • [AI Triage & RAG](#-ai-triage--semantic-rag-engine) • [Multi-Tenancy](#-multi-tenancy--zero-leakage-security) • [State Machine](#-ticket-state-machine) • [Tech Stack](#-technology-stack) • [Quick Start](#-quick-start) • [ADRs](./docs/ARCHITECTURE_DECISIONS.md) • [API Docs](#-api-documentation) • [Documentation](#-project-documentation)
+[Key Features](#-key-features) • [Architecture](#-system-architecture) • [AI Triage & RAG](#-ai-triage--semantic-rag-engine) • [Multi-Tenancy](#-multi-tenancy--zero-leakage-security) • [State Machine](#-ticket-state-machine) • [Tech Stack](#-technology-stack) • [Quick Start](#-quick-start) • [Interview Masterclass](./docs/INTERVIEW_AND_ARCHITECTURE_GUIDE.md) • [ADRs](./docs/ARCHITECTURE_DECISIONS.md) • [API Docs](#-api-documentation) • [Documentation](#-project-documentation)
 
 </div>
 
@@ -439,6 +439,7 @@ All endpoints are documented with request/response schemas and grouped by featur
 
 ## 📖 Project Documentation
 
+- 🎓 [**`docs/INTERVIEW_AND_ARCHITECTURE_GUIDE.md`**](./docs/INTERVIEW_AND_ARCHITECTURE_GUIDE.md) — **Master Interview & Architecture Guide**: End-to-end explanation of every system component, trade-off analysis, failure modes, and top 10 interview questions
 - 🏗️ [**`docs/ARCHITECTURE_DECISIONS.md`**](./docs/ARCHITECTURE_DECISIONS.md) — Narrative architecture decision records: why RLS, dual-vendor AI, mathematical confidence scoring, Kafka event publishing, and Redis Lua rate limiting
 - 📑 [**`PROJECT_ANALYSIS.md`**](./PROJECT_ANALYSIS.md) — Comprehensive technical architecture, database schemas, and source code inventory
 - 📋 [**`CURRENT_STATE.md`**](./CURRENT_STATE.md) — Complete 12-phase implementation milestone scorecard and test verification evidence
